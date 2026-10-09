@@ -24,7 +24,7 @@ public sealed partial class TravianClient : IFarmingClient
         var goldClubEnabled = await ReadGoldClubEnabledAsync(cancellationToken);
         if (!goldClubEnabled)
         {
-            throw new InvalidOperationException("Gold Club is not enabled for this account.");
+            NotifyFarmListsWithoutGoldClub();
         }
 
         // The farm list page is React-rendered, so the wrappers can be missing on the first read
@@ -115,7 +115,7 @@ public sealed partial class TravianClient : IFarmingClient
         await EnsureLoggedInAsync(cancellationToken: cancellationToken);
         if (!await ReadGoldClubEnabledAsync(cancellationToken))
         {
-            throw new InvalidOperationException("Gold Club is not enabled for this account.");
+            NotifyFarmListsWithoutGoldClub();
         }
 
         await EnsureRallyPointAndOpenFarmListPageAsync(cancellationToken, refreshCurrentPage: true);
@@ -178,7 +178,7 @@ public sealed partial class TravianClient : IFarmingClient
         await EnsureLoggedInAsync(cancellationToken: cancellationToken);
         if (!await ReadGoldClubEnabledAsync(cancellationToken))
         {
-            throw new InvalidOperationException("Gold Club is not enabled for this account.");
+            NotifyFarmListsWithoutGoldClub();
         }
 
         await EnsureRallyPointAndOpenFarmListPageAsync(cancellationToken, refreshCurrentPage: true);
@@ -289,7 +289,7 @@ public sealed partial class TravianClient : IFarmingClient
         await EnsureLoggedInAsync(cancellationToken: cancellationToken);
         if (!await ReadGoldClubEnabledAsync(cancellationToken))
         {
-            throw new InvalidOperationException("Gold Club is not enabled for this account.");
+            NotifyFarmListsWithoutGoldClub();
         }
 
         await EnsureRallyPointAndOpenFarmListPageAsync(cancellationToken, refreshCurrentPage: true);
@@ -484,7 +484,7 @@ public sealed partial class TravianClient : IFarmingClient
         await EnsureLoggedInAsync(cancellationToken: cancellationToken);
         if (!await ReadGoldClubEnabledAsync(cancellationToken))
         {
-            throw new InvalidOperationException("Gold Club is not enabled for this account.");
+            NotifyFarmListsWithoutGoldClub();
         }
 
         await EnsureRallyPointAndOpenFarmListPageAsync(cancellationToken);
@@ -555,7 +555,7 @@ public sealed partial class TravianClient : IFarmingClient
         await EnsureLoggedInAsync(cancellationToken: cancellationToken);
         if (!await ReadGoldClubEnabledAsync(cancellationToken))
         {
-            throw new InvalidOperationException("Gold Club is not enabled for this account.");
+            NotifyFarmListsWithoutGoldClub();
         }
 
         await EnsureRallyPointAndOpenFarmListPageAsync(cancellationToken);
@@ -1183,6 +1183,17 @@ public sealed partial class TravianClient : IFarmingClient
             }
             """,
             lid);
+    }
+
+    // Official worlds now offer the Farm List tab to every account; Gold Club only adds extras.
+    // The page open below (EnsureRallyPointAndOpenFarmListPageAsync) is the real availability check,
+    // so a missing Gold Club is logged once per session instead of blocking farming.
+    private void NotifyFarmListsWithoutGoldClub()
+    {
+        if (_session.LogValueChanged("farm-list-no-gold-club", "true"))
+        {
+            Notify("[farm-list] Gold Club is not active on this account; using the Farm List page directly.");
+        }
     }
 
     private async Task EnsureRallyPointAndOpenFarmListPageAsync(

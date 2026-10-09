@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TbotUltraMac</AssemblyName>
+    <RootNamespace>TbotUltra.Mac</RootNamespace>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../../VERSION').Trim().TrimStart('v'))</Version>
+    <!-- The Worker project is an executable host of its own; the Mac app only reuses its engine. -->
+    <ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TbotUltra.Worker\TbotUltra.Worker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Web\index.html" LogicalName="TbotUltra.Mac.Web.index.html" />
+    <EmbeddedResource Include="..\..\.release-template\config\bot.json" LogicalName="TbotUltra.Mac.Data.bot.json" />
+  </ItemGroup>
+</Project>

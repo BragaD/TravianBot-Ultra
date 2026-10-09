@@ -191,7 +191,7 @@ public static class ChromiumInstaller
     }
 
     private static string ResolveNodePath()
-        => Path.Combine(AppContext.BaseDirectory, ".playwright", "node", "win32_x64", "node.exe");
+        => PlaywrightDriverLayout.NodePath(Path.Combine(AppContext.BaseDirectory, ".playwright"));
 
     private static string ResolveCliPath()
         => Path.Combine(AppContext.BaseDirectory, ".playwright", "package", "cli.js");

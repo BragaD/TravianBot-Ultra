@@ -113,19 +113,20 @@ public sealed class LaunchedBrowserRegistryTests : IDisposable
         Assert.False(File.Exists(RegistryPath));
     }
 
-    [Theory]
-    [InlineData(@"C:\Tbot\.playwright\node\win32_x64\node.exe", @"C:\Tbot\.playwright", true)]
-    [InlineData(@"C:\Program Files\Google\Chrome\Application\chrome.exe", @"C:\Tbot\.playwright", false)]
-    [InlineData(@"C:\Other\.playwright\node\win32_x64\node.exe", @"C:\Tbot\.playwright", false)]
-    [InlineData("", @"C:\Tbot\.playwright", false)]
-    public void OwnershipRequiresTheExactConfiguredPlaywrightDriver(
-        string executablePath,
-        string driverRoot,
-        bool expected)
+    [Fact]
+    public void OwnershipRequiresTheExactConfiguredPlaywrightDriver()
     {
-        Assert.Equal(
-            expected,
-            LaunchedBrowserRegistry.IsConfiguredPlaywrightDriverExecutable(executablePath, driverRoot));
+        // Paths are built for the current platform: the driver's node location differs per OS.
+        var driverRoot = Path.Combine(_root, "Tbot", ".playwright");
+        var otherRoot = Path.Combine(_root, "Other", ".playwright");
+        var browserPath = Path.Combine(_root, "Google", "Chrome", "Application", "chrome.exe");
+
+        Assert.True(LaunchedBrowserRegistry.IsConfiguredPlaywrightDriverExecutable(
+            PlaywrightDriverLayout.NodePath(driverRoot), driverRoot));
+        Assert.False(LaunchedBrowserRegistry.IsConfiguredPlaywrightDriverExecutable(browserPath, driverRoot));
+        Assert.False(LaunchedBrowserRegistry.IsConfiguredPlaywrightDriverExecutable(
+            PlaywrightDriverLayout.NodePath(otherRoot), driverRoot));
+        Assert.False(LaunchedBrowserRegistry.IsConfiguredPlaywrightDriverExecutable(string.Empty, driverRoot));
     }
 
     private void WriteRegistry(int pid, long startedAtUtcTicks, string executablePath)

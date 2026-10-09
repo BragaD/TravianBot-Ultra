@@ -49,7 +49,7 @@ public sealed partial class TravianClient
         await EnsureLoggedInAsync(cancellationToken: cancellationToken);
         if (!await ReadGoldClubEnabledAsync(cancellationToken))
         {
-            throw new InvalidOperationException("Gold Club is not enabled for this account.");
+            NotifyFarmListsWithoutGoldClub();
         }
 
         try

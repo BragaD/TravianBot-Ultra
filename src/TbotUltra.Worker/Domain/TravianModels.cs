@@ -414,6 +414,8 @@ public sealed record FarmListOverview(
 
 public sealed record FarmListSendEntry(string Name, string? ListId);
 
+public sealed record FarmRaidBatchResult(int ListCount, int Sent, int AlreadyRunning, int WaitingForTroops, int Failed);
+
 public sealed record FarmListSendBatchResult(
     IReadOnlyList<FarmListSendEntry> AttemptedLists,
     IReadOnlyList<FarmListSendEntry> SentLists)

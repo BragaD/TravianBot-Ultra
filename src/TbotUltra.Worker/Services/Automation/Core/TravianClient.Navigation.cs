@@ -76,7 +76,8 @@ public sealed partial class TravianClient
         // "0" — so the first keystroke REPLACES it instead of landing in front of it (which produced e.g.
         // "098" when re-typing into a reused Add-target form).
             await Task.Delay(Random.Shared.Next(20, 45), cancellationToken);
-            await input.PressAsync("Control+A");
+            // ControlOrMeta: select-all is Cmd+A on macOS, where Ctrl+A only moves the caret.
+            await input.PressAsync("ControlOrMeta+A");
         // One randomized delay-per-keystroke per field, so different fields are typed at a slightly
         // different speed (e.g. ~45-110 ms/char) rather than a constant machine-like rhythm.
             var keyDelay = Random.Shared.Next(45, 110);

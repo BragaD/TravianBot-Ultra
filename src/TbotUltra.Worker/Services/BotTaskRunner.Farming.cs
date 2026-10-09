@@ -227,6 +227,39 @@ public sealed partial class BotTaskRunner
         return overview;
     }
 
+    // Farm-list dispatch for accounts without Gold Club: sends every active, idle target of the
+    // selected lists as an individual Rally Point raid. Also reports whether Gold Club is active so
+    // the caller can prefer the regular list Start when it is.
+    public async Task<(bool GoldClubActive, FarmRaidBatchResult? Result)> SendFarmListTargetsAsRaidsUnlessGoldClubAsync(
+        BotOptions options,
+        Action<string> log,
+        string? accountName = null,
+        CancellationToken cancellationToken = default)
+    {
+        var goldClubActive = false;
+        FarmRaidBatchResult? result = null;
+        await ExecuteWithClientAsync(
+            options,
+            log,
+            accountName,
+            interactive: false,
+            cancellationToken,
+            async client =>
+            {
+                await client.LoginAsync(cancellationToken);
+                goldClubActive = await client.ReadGoldClubStatusAsync(cancellationToken);
+                if (!goldClubActive)
+                {
+                    result = await client.SendFarmListTargetsAsRaidsAsync(
+                        options.ContinuousFarmListNames,
+                        options.ContinuousFarmListIds,
+                        cancellationToken);
+                }
+            });
+
+        return (goldClubActive, result);
+    }
+
     public async Task<int?> SendFarmListNowAsync(
         BotOptions options,
         string farmListName,

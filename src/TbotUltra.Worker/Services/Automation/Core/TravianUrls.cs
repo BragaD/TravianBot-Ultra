@@ -80,7 +80,8 @@ internal static class TravianUrls
             return "artifact";
         }
 
-        var invalidChars = Path.GetInvalidFileNameChars();
+        // Always reject the Windows-invalid set too, so artifact names stay portable between platforms.
+        var invalidChars = Path.GetInvalidFileNameChars().Concat("\\/:*?\"<>|").ToArray();
         var sanitized = new string(value.Select(ch => invalidChars.Contains(ch) ? '_' : ch).ToArray()).Trim();
         return string.IsNullOrWhiteSpace(sanitized)
             ? "artifact"

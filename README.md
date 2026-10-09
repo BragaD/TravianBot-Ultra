@@ -51,6 +51,8 @@ Windows may show a SmartScreen or certificate warning because the application is
 
 If prompted, click More info → Run anyway.
 
+**macOS:** build and run the native Mac app with `./macos/build-mac.sh` — see [macos/README.md](macos/README.md).
+
 **Multiple accounts at once:** with the portable build, extract a separate copy of the
 folder per account (e.g. `Tbot-account1\`, `Tbot-account2\`) and run them at the same
 time — each copy keeps its own config, account, browser session and logs. Don't run two

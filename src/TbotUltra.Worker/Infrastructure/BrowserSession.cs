@@ -232,7 +232,7 @@ public sealed partial class BrowserSession : IAsyncDisposable
             {
                 _log?.Invoke(
                     $"[browser] Playwright driver failed to start from '{driverPath}'. " +
-                    $"nodeExists={File.Exists(Path.Combine(driverPath, "node", "win32_x64", "node.exe"))} " +
+                    $"nodeExists={File.Exists(PlaywrightDriverLayout.NodePath(driverPath))} " +
                     $"cliExists={File.Exists(Path.Combine(driverPath, "package", "cli.js"))}. {ex.Message}");
                 throw;
             }
@@ -867,6 +867,29 @@ public sealed partial class BrowserSession : IAsyncDisposable
     // preferring Google Chrome, then Edge. Returns null when neither is installed at a standard path.
     private static string? ResolveInstalledChromeChannel()
     {
+        if (OperatingSystem.IsMacOS())
+        {
+            var userApplications = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Applications");
+            foreach (var applications in new[] { "/Applications", userApplications })
+            {
+                if (File.Exists(Path.Combine(applications, "Google Chrome.app", "Contents", "MacOS", "Google Chrome")))
+                {
+                    return "chrome";
+                }
+            }
+
+            foreach (var applications in new[] { "/Applications", userApplications })
+            {
+                if (File.Exists(Path.Combine(applications, "Microsoft Edge.app", "Contents", "MacOS", "Microsoft Edge")))
+                {
+                    return "msedge";
+                }
+            }
+
+            return null;
+        }
+
         var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1032,7 +1055,7 @@ public sealed partial class BrowserSession : IAsyncDisposable
     internal static string ResolvePlaywrightDriverPath(string projectRoot, string appBaseDirectory)
     {
         var bundledDriverPath = Path.Combine(appBaseDirectory, LocalPlaywrightDriverDirectoryName);
-        if (File.Exists(Path.Combine(bundledDriverPath, "node", "win32_x64", "node.exe")) &&
+        if (File.Exists(PlaywrightDriverLayout.NodePath(bundledDriverPath)) &&
             File.Exists(Path.Combine(bundledDriverPath, "package", "cli.js")))
         {
             return bundledDriverPath;

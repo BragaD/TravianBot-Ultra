@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tbot Ultra</title>
+<style>
+:root {
+  --bg: #14161a; --panel: #1c1f25; --panel2: #232730; --line: #2e333d; --text: #e6e8ec; --muted: #8e96a3;
+  --accent: #4c8dff; --good: #3fb97a; --warn: #e0a83a; --bad: #e5604f;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; display: flex; flex-direction: column; }
+header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 600; }
+.status { color: var(--muted); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+.dot.on { background: var(--good); } .dot.busy { background: var(--warn); }
+main { flex: 1; display: flex; min-height: 0; }
+nav { width: 150px; background: var(--panel); border-right: 1px solid var(--line); padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+nav button { text-align: left; background: none; border: 0; color: var(--muted); padding: 7px 10px; border-radius: 6px; font: inherit; cursor: pointer; }
+nav button.active { background: var(--panel2); color: var(--text); }
+nav .ver { margin-top: auto; color: var(--muted); font-size: 11px; padding: 6px 10px; }
+section { flex: 1; overflow: auto; padding: 16px 20px; display: none; }
+section.active { display: block; }
+h2 { font-size: 14px; margin: 0 0 10px; } h3 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); font-weight: 600; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+button.btn, select, input[type=text], input[type=password], input[type=number] {
+  background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; }
+button.btn { cursor: pointer; } button.btn:hover { border-color: var(--accent); }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.btn.danger { color: var(--bad); } button.btn:disabled { opacity: .45; cursor: default; }
+button.mini { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 5px; font: inherit; } button.mini:hover { color: var(--text); }
+input[type=number] { width: 72px; } label { display: inline-flex; align-items: center; gap: 6px; }
+label.field { display: flex; flex-direction: column; align-items: stretch; gap: 3px; color: var(--muted); font-size: 12px; }
+table { border-collapse: collapse; width: 100%; } td, th { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+.muted { color: var(--muted); } .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+.pill { display: inline-block; padding: 1px 7px; border-radius: 10px; background: var(--panel2); font-size: 11px; color: var(--muted); }
+#alert { display: none; background: #3a2320; border-bottom: 1px solid var(--bad); color: #ffd2cb; padding: 8px 16px; }
+#logs { font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+#logs div { padding: 0 2px; } #logs .t { color: var(--muted); }
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 18px; max-width: 520px; }
+dialog::backdrop { background: rgba(0,0,0,.55); }
+.res { display: flex; gap: 14px; flex-wrap: wrap; } .res span b { font-weight: 600; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.tabs button.btn.sel { border-color: var(--accent); color: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tbot Ultra</h1>
+  <select id="accountPicker" title="Active account"></select>
+  <span class="status"><span class="dot" id="dot"></span><span id="activity">Loading…</span></span>
+  <button class="btn" id="btnLogin">Log in</button>
+  <button class="btn primary" id="btnStart">Start bot</button>
+  <button class="btn" id="btnStop">Stop</button>
+  <button class="btn" id="btnLogout">Log out</button>
+</header>
+<div id="alert"></div>
+<main>
+  <nav id="nav">
+    <button data-tab="dashboard" class="active">Dashboard</button>
+    <button data-tab="villages">Building</button>
+    <button data-tab="troops">Troops</button>
+    <button data-tab="hero">Hero</button>
+    <button data-tab="farming">Farming</button>
+    <button data-tab="settings">Settings</button>
+    <button data-tab="accounts">Accounts</button>
+    <button data-tab="logs">Log</button>
+    <div class="ver" id="ver"></div>
+  </nav>
+
+  <section id="tab-dashboard" class="active">
+    <div class="card"><h2>Automation</h2><div class="row" id="features"></div></div>
+    <div class="card"><h2>Scheduled work</h2><div id="jobs" class="muted">Nothing scheduled.</div></div>
+    <div class="card"><div class="row"><h2 style="margin:0;flex:1">Villages</h2><button class="btn" id="btnScan">Scan all villages</button></div><div id="villageCards" class="grid" style="margin-top:10px"></div></div>
+  </section>
+
+  <section id="tab-villages">
+    <div class="tabs" id="villageTabsBuild"></div>
+    <div id="buildPane"></div>
+  </section>
+
+  <section id="tab-troops">
+    <div class="tabs" id="villageTabsTroops"></div>
+    <div id="troopPane"></div>
+  </section>
+
+  <section id="tab-hero">
+    <div class="card"><div class="row"><h2 style="margin:0;flex:1">Hero</h2><button class="btn" id="btnHeroRefresh">Read hero inventory</button></div><div id="heroInfo" class="muted" style="margin-top:8px">Log in to read the hero.</div></div>
+    <div class="card"><h2>Adventures</h2><div class="row" id="heroOptions"></div></div>
+    <div class="card"><h2>Hero inventory resources</h2>
+      <p class="muted" style="margin-top:0">When a build or upgrade is short on resources, the bot can move wood, clay, iron and crop from the hero's inventory into the village.</p>
+      <div class="row" id="heroResourceOptions"></div></div>
+  </section>
+
+  <section id="tab-farming">
+    <div class="card"><h2>Farm lists</h2><div class="row" id="farmOptions"></div></div>
+    <div class="card"><div class="row"><h2 style="margin:0;flex:1">Lists to send</h2><button class="btn" id="btnFarmRefresh">Read farm lists</button></div>
+      <p class="muted">Leave every list unticked to send all lists.</p><div id="farmLists" class="muted">No farm lists read yet.</div></div>
+    <div class="card"><h2>Create a farm list</h2><div class="row" id="farmCreate"></div></div>
+    <div class="card"><h2>Add targets to a list</h2><div class="row" id="farmTargets"></div>
+      <p class="muted">Coordinates like <code>12|-34</code>, separated by spaces or new lines. Each target is raided with the troops chosen here.</p></div>
+  </section>
+
+  <section id="tab-settings">
+    <div class="card"><h2>Construction</h2><div class="row" id="constructionOptions"></div></div>
+    <div class="card"><h2>Pacing</h2><div class="row" id="pacingOptions"></div></div>
+    <div class="card"><h2>Game language</h2><p class="muted" style="margin-top:0">The game must be set to English for the bot to read pages.</p><button class="btn" id="btnEnglish">Set game language to English</button></div>
+    <div class="card"><h2>Data</h2><div class="muted" id="dataRoot"></div></div>
+  </section>
+
+  <section id="tab-accounts">
+    <div class="card"><h2>Accounts</h2><div id="accountList"></div></div>
+    <div class="card"><h2 id="accountFormTitle">Add account</h2>
+      <div class="grid">
+        <label class="field">Name (letters/digits)<input type="text" id="accName" placeholder="main"></label>
+        <label class="field">Email / username<input type="text" id="accUser" autocomplete="off"></label>
+        <label class="field">Password<input type="password" id="accPass" autocomplete="new-password" placeholder="leave empty to keep"></label>
+        <label class="field">Server URL (empty = choose world at login)<input type="text" id="accServer" placeholder="https://ts1.x1.europe.travian.com"></label>
+        <label class="field">Proxy (optional)<input type="text" id="accProxy" placeholder="host:port or user:pass@host:port"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label><input type="checkbox" id="accManual"> Manual login (I type the password in the browser myself)</label>
+        <span style="flex:1"></span><button class="btn primary" id="btnSaveAccount">Save account</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-logs">
+    <div class="row" style="margin-bottom:8px"><h2 style="margin:0;flex:1">Log</h2><label><input type="checkbox" id="logFollow" checked> Follow</label><button class="btn" id="btnClearLog">Clear view</button></div>
+    <div class="card"><div id="logs"></div></div>
+  </section>
+</main>
+
+<dialog id="promptDialog"><p id="promptMessage"></p><div id="promptOptions" style="display:flex;flex-direction:column;gap:6px"></div></dialog>
+
+<script>
+const TOKEN = "__TBOT_TOKEN__";
+const $ = id => document.getElementById(id);
+let state = null, catalog = null, catalogTribe = null, lastLogId = 0, selectedVillage = null, shownPrompt = null;
+
+async function api(method, path, body) {
+  const response = await fetch(path, {
+    method, headers: { "X-Tbot-Token": TOKEN, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`;
+    try { message = (await response.json()).error || message; } catch { /* no body */ }
+    showAlert(message);
+    throw new Error(message);
+  }
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+function showAlert(message) { const el = $("alert"); el.textContent = message; el.style.display = message ? "block" : "none"; }
+function when(iso) {
+  if (!iso) return "";
+  const date = new Date(iso), seconds = Math.round((date - Date.now()) / 1000);
+  if (date.getFullYear() < 2000 || seconds <= 0) return "now";
+  if (seconds < 90) return `in ${seconds}s`;
+  if (seconds < 5400) return `in ${Math.round(seconds / 60)} min`;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+const opt = (key, fallback) => (state.settings.options[key] ?? fallback);
+
+// ----- Option controls: every control writes one engine option key -----------------------------
+function boolOption(key, label, fallback) {
+  return `<label><input type="checkbox" data-opt="${key}" data-kind="bool" ${String(opt(key, fallback)) === "true" ? "checked" : ""}> ${esc(label)}</label>`;
+}
+function numberOption(key, label, fallback, min, max) {
+  return `<label>${esc(label)} <input type="number" data-opt="${key}" min="${min}" max="${max}" value="${esc(opt(key, fallback))}"></label>`;
+}
+function selectOption(key, label, fallback, choices) {
+  const current = String(opt(key, fallback));
+  return `<label>${esc(label)} <select data-opt="${key}">${choices.map(([value, text]) =>
+    `<option value="${value}" ${value === current ? "selected" : ""}>${esc(text)}</option>`).join("")}</select></label>`;
+}
+document.addEventListener("change", async event => {
+  const el = event.target;
+  if (el.dataset.opt) {
+    const value = el.dataset.kind === "bool" ? String(el.checked) : el.value;
+    state.settings.options[el.dataset.opt] = value;
+    await api("PUT", "/api/settings/options", { [el.dataset.opt]: value });
+  } else if (el.dataset.feature) {
+    state.settings.features[el.dataset.feature] = el.checked;
+    await api("PUT", "/api/settings/features", state.settings.features);
+  } else if (el.dataset.farm !== undefined) {
+    const picked = [...document.querySelectorAll("[data-farm]:checked")];
+    await api("PUT", "/api/settings/farmlists", { names: picked.map(i => i.dataset.farm), ids: picked.map(i => i.dataset.farmId).filter(Boolean) });
+  } else if (el.dataset.troop) {
+    await saveTroops();
+  } else if (el.dataset.village) {
+    await api("PUT", `/api/villages/${encodeURIComponent(el.dataset.village)}`, { [el.dataset.villageField]: el.checked });
+  }
+  refresh();
+});
+
+// ----- Rendering -----------------------------------------------------------------------------
+const FEATURES = [["construction", "Building"], ["hero", "Hero adventures"], ["heroResources", "Use hero inventory resources"],
+  ["farming", "Farm lists"], ["troops", "Train troops"], ["smithy", "Smithy upgrades"], ["townHall", "Town Hall celebrations"],
+  ["collectTasks", "Collect task rewards"], ["collectDailyQuests", "Collect daily quests"]];
+
+function renderStatic() {
+  $("features").innerHTML = FEATURES.map(([key, label]) =>
+    `<label><input type="checkbox" data-feature="${key}" ${state.settings.features[key] ? "checked" : ""}> ${label}</label>`).join("");
+  $("heroOptions").innerHTML = [
+    numberOption("hero_min_hp_for_adventure", "Minimum HP %", 50, 1, 100),
+    selectOption("hero_adventure_pick_order", "Pick", "shortest", [["shortest", "Shortest adventure"], ["top", "First in list"]]),
+    boolOption("hero_auto_revive", "Revive hero automatically", true),
+    boolOption("hero_auto_assign_points", "Spend attribute points", true),
+    boolOption("hero_auto_use_ointments", "Use ointments to heal", false)].join("");
+  $("heroResourceOptions").innerHTML = [
+    `<label><input type="checkbox" data-feature="heroResources" ${state.settings.features.heroResources ? "checked" : ""}> Enabled</label>`,
+    boolOption("hero_resource_use_construction", "For buildings and fields", true),
+    boolOption("hero_resource_use_smithy", "For smithy upgrades", true),
+    boolOption("hero_resource_use_town_hall", "For Town Hall celebrations", true)].join("");
+  $("farmOptions").innerHTML = [
+    selectOption("continuous_farm_send_mode", "Mode", "shared_schedule",
+      [["shared_schedule", "All lists on one timer"], ["list_per_list", "Each list on its own timer"], ["all_at_once", "Start-all button"]]),
+    numberOption("continuous_farm_dispatch_delay_min_minutes", "Send every (min minutes)", 30, 1, 1440),
+    numberOption("continuous_farm_dispatch_delay_max_minutes", "to (max minutes)", 90, 1, 1440)].join("");
+  $("constructionOptions").innerHTML = [
+    selectOption("resource_build_strategy", "Resource field order", "lowest_first", [["lowest_first", "Lowest level first"], ["smart", "Smart (by need)"]]),
+    boolOption("construction_humanize_delay_enabled", "Random delay before queueing the next build", false)].join("");
+  $("pacingOptions").innerHTML = [
+    boolOption("action_pacing_enabled", "Human-like pauses between clicks and page loads", true)].join("");
+  $("dataRoot").textContent = `Accounts, settings and logs are stored in ${state.dataRoot}`;
+  $("ver").textContent = `v${state.version} · macOS`;
+}
+
+function renderHeader() {
+  const picker = $("accountPicker");
+  picker.innerHTML = state.accounts.length
+    ? state.accounts.map(a => `<option ${a.name === state.activeAccount ? "selected" : ""}>${esc(a.name)}</option>`).join("")
+    : "<option>No account</option>";
+  picker.disabled = state.loggedIn || !!state.busy || state.accounts.length < 2;
+  $("activity").textContent = state.busy ? `${state.busy}…` : state.activity;
+  $("dot").className = "dot" + (state.busy ? " busy" : state.running ? " on" : "");
+  $("btnLogin").disabled = state.loggedIn || !!state.busy || !state.accounts.length;
+  $("btnStart").disabled = !state.loggedIn || state.running || !!state.busy;
+  $("btnStop").disabled = !state.running;
+  $("btnLogout").disabled = !state.loggedIn;
+  $("btnLogin").textContent = state.busy === "Logging in" ? "Logging in…" : "Log in";
+  if (state.alert) showAlert(state.alert);
+}
+
+function renderDashboard() {
+  $("jobs").innerHTML = state.jobs.length ? `<table><tr><th>Work</th><th>Next run</th><th>Last result</th><th></th></tr>${state.jobs.map(job =>
+    `<tr><td>${esc(job.title)}</td><td style="white-space:nowrap">${when(job.dueUtc)}</td><td class="muted">${esc(job.lastResult)}</td>
+     <td style="white-space:nowrap"><button class="mini" data-run="${esc(job.key)}">Run now</button></td></tr>`).join("")}</table>`
+    : "Nothing scheduled. Turn on a feature above, or add items to a village's build queue.";
+  $("villageCards").innerHTML = state.villages.length ? state.villages.map(v => {
+    const vs = state.settings.villages[v.key] || {};
+    const res = ["wood", "clay", "iron", "crop"].map(k => `<span>${k} <b>${esc(v.resources[k] ?? "–")}</b></span>`).join("");
+    const building = (v.constructions || []).map(c => `${esc(c.name)} ${c.level ?? ""} ${when(c.finishUtc)}`).join(", ");
+    return `<div class="card" style="margin:0"><div class="row"><b style="flex:1">${esc(v.name)}</b>
+      ${v.isCapital ? '<span class="pill">capital</span>' : ""}<span class="pill">${v.x ?? "?"}|${v.y ?? "?"}</span></div>
+      <div class="res" style="margin:6px 0">${res}</div>
+      <div class="muted">${building ? "Building: " + building : "No construction running"}</div>
+      <div class="muted">Queue: ${(vs.buildQueue || []).length} item(s)</div>
+      <label style="margin-top:6px"><input type="checkbox" data-village="${esc(v.key)}" data-village-field="enabled" ${vs.enabled !== false ? "checked" : ""}> Automate this village</label></div>`;
+  }).join("") : '<div class="muted">Log in to load your villages.</div>';
+}
+
+function villageTabs(containerId) {
+  if (!state.villages.some(v => v.key === selectedVillage)) selectedVillage = state.villages[0]?.key ?? null;
+  $(containerId).innerHTML = state.villages.map(v =>
+    `<button class="btn ${v.key === selectedVillage ? "sel" : ""}" data-pick="${esc(v.key)}">${esc(v.name)}</button>`).join("");
+  return state.villages.find(v => v.key === selectedVillage);
+}
+
+function describeItem(item) {
+  if (item.type === "resources_all") return `All resource fields (${item.resourceTypes}) to level ${item.targetLevel}`;
+  if (item.type === "building_construct") return `Construct ${item.name} in slot ${item.slotId} → level ${item.targetLevel}`;
+  return `${item.name} (slot ${item.slotId}) → level ${item.targetLevel}`;
+}
+
+function renderBuild() {
+  const village = villageTabs("villageTabsBuild");
+  if (!village) { $("buildPane").innerHTML = '<div class="card muted">Log in to load your villages.</div>'; return; }
+  if (document.activeElement && $("buildPane").contains(document.activeElement) && document.activeElement.tagName !== "BUTTON") return;
+  const vs = state.settings.villages[village.key] || { buildQueue: [] };
+  const queue = vs.buildQueue.length ? `<table><tr><th>#</th><th>Item</th><th>Status</th><th></th></tr>${vs.buildQueue.map((item, i) =>
+    `<tr><td>${i + 1}</td><td>${esc(describeItem(item))}</td>
+     <td><span class="${item.status === "blocked" ? "bad" : "muted"}">${esc(item.status)}</span> <span class="muted">${esc(item.note)}</span></td>
+     <td style="white-space:nowrap">${item.status === "blocked" ? `<button class="mini" data-q="retry" data-id="${item.id}">Retry</button>` : ""}
+       <button class="mini" data-q="up" data-id="${item.id}">↑</button><button class="mini" data-q="down" data-id="${item.id}">↓</button>
+       <button class="mini" data-q="remove" data-id="${item.id}">✕</button></td></tr>`).join("")}</table>`
+    : '<div class="muted">The queue is empty. Add items below — they are built top to bottom.</div>';
+  const fields = village.fields.map(f => `<option value="${f.slotId}" data-name="${esc(f.name)}">Slot ${f.slotId}: ${esc(f.name)} (level ${f.level ?? "?"})</option>`).join("");
+  const empty = village.buildings.filter(b => !b.name || /^empty$/i.test(b.name));
+  const built = village.buildings.filter(b => !empty.includes(b) && !/^unknown$/i.test(b.name));
+  const buildings = built.map(b => `<option value="${b.slotId}" data-name="${esc(b.name)}">Slot ${b.slotId}: ${esc(b.name)} (level ${b.level ?? "?"})</option>`).join("");
+  const emptySlots = empty.map(b => `<option value="${b.slotId}">Slot ${b.slotId}</option>`).join("");
+  const catalogOptions = (catalog?.buildings || []).map(b => `<option value="${b.gid}" data-name="${esc(b.name)}" title="${esc(b.requirements.join(", "))}">${esc(b.name)}</option>`).join("");
+  $("buildPane").innerHTML = `
+    <div class="card"><h2>Build queue — ${esc(village.name)}</h2>${queue}</div>
+    <div class="card"><h2>Add to queue</h2>
+      <h3>All resource fields</h3>
+      <div class="row">${["wood", "clay", "iron", "crop"].map(t => `<label><input type="checkbox" class="resType" value="${t}" checked> ${t}</label>`).join("")}
+        <label>to level <input type="number" id="allLevel" min="1" max="25" value="5"></label><button class="btn" data-add="resources_all">Add</button></div>
+      <h3>One resource field</h3>
+      <div class="row"><select id="fieldSlot">${fields || "<option value=''>Scan the village first</option>"}</select>
+        <label>to level <input type="number" id="fieldLevel" min="1" max="25" value="5"></label><button class="btn" data-add="resource_field">Add</button></div>
+      <h3>Upgrade a building</h3>
+      <div class="row"><select id="buildingSlot">${buildings || "<option value=''>Scan the village first</option>"}</select>
+        <label>to level <input type="number" id="buildingLevel" min="1" max="20" value="5"></label><button class="btn" data-add="building_upgrade">Add</button></div>
+      <h3>Construct a new building</h3>
+      <div class="row"><select id="constructGid">${catalogOptions}</select>
+        <label>in <select id="constructSlot">${emptySlots || "<option value=''>No empty slot known</option>"}</select></label>
+        <label>to level <input type="number" id="constructLevel" min="1" max="20" value="1"></label><button class="btn" data-add="building_construct">Add</button></div>
+      <p class="muted">Village data last read ${village.updatedUtc ? new Date(village.updatedUtc).toLocaleString() : "never"}. Use “Scan all villages” on the Dashboard to refresh slots.</p>
+    </div>`;
+}
+
+const TROOP_BUILDINGS = [["barracks", "Barracks"], ["stable", "Stable"], ["workshop", "Workshop"]];
+function renderTroops() {
+  const village = villageTabs("villageTabsTroops");
+  if (!village) { $("troopPane").innerHTML = '<div class="card muted">Log in to load your villages.</div>'; return; }
+  if (document.activeElement && $("troopPane").contains(document.activeElement)) return;
+  const vs = state.settings.villages[village.key] || { troops: {} };
+  const t = (key, fallback) => vs.troops?.[key] ?? fallback;
+  const cards = TROOP_BUILDINGS.map(([id, label]) => {
+    const p = `troop_training_${id}_`, types = catalog?.troops?.[id] || [];
+    return `<div class="card"><div class="row"><h2 style="margin:0;flex:1">${label}</h2>
+        <label><input type="checkbox" data-troop="${p}enabled" data-kind="bool" ${t(p + "enabled", "false") === "true" ? "checked" : ""}> Train here</label></div>
+      <div class="row" style="margin-top:8px">
+        <label>Unit <select data-troop="${p}troop_type">${types.map(n => `<option ${n === t(p + "troop_type", "") ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
+        <label>Amount <select data-troop="${p}amount_mode">
+          <option value="maximum" ${t(p + "amount_mode", "maximum") === "maximum" ? "selected" : ""}>As many as possible</option>
+          <option value="keep_resources" ${t(p + "amount_mode", "") === "keep_resources" ? "selected" : ""}>Keep some resources</option></select></label>
+        <label>Keep % <input type="number" data-troop="${p}keep_resources_percent" min="0" max="95" value="${esc(t(p + "keep_resources_percent", "0"))}"></label>
+        <label>Max queue hours (0 = no limit) <input type="number" data-troop="${p}max_queue_hours" min="0" max="240" value="${t(p + "max_queue_hours", "no_limit") === "no_limit" ? 0 : esc(t(p + "max_queue_hours", 0))}"></label>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label>Train <select data-troop="${p}run_mode">
+          <option value="resource_percent" ${t(p + "run_mode", "resource_percent") === "resource_percent" ? "selected" : ""}>When storage is filled to…</option>
+          <option value="timed" ${t(p + "run_mode", "") === "timed" ? "selected" : ""}>On a timer</option></select></label>
+        <label>Storage % <input type="number" data-troop="${p}minimum_resources_percent" min="0" max="100" value="${esc(t(p + "minimum_resources_percent", "0"))}"></label>
+        <label>Timer min <input type="number" data-troop="${p}timed_min_minutes" min="1" max="1440" value="${esc(t(p + "timed_min_minutes", "30"))}"></label>
+        <label>max <input type="number" data-troop="${p}timed_max_minutes" min="1" max="1440" value="${esc(t(p + "timed_max_minutes", "120"))}"></label> minutes
+      </div></div>`;
+  }).join("");
+  const smithy = (vs.smithyTargets || "").split(";").filter(Boolean).map(e => e.split("="));
+  const all = catalog?.troops?.all || [];
+  const smithyRows = smithy.map(([key, level]) => {
+    const troop = all.find(a => `t${a.index}` === key);
+    return `<span class="pill">${esc(troop?.name ?? key)} → ${esc(level)} <button class="mini" data-smithy-remove="${esc(key)}">✕</button></span>`;
+  }).join(" ");
+  $("troopPane").innerHTML = `${cards}
+    <div class="card"><h2>Smithy upgrades — ${esc(village.name)}</h2><div class="row">${smithyRows || '<span class="muted">No smithy targets.</span>'}</div>
+      <div class="row" style="margin-top:8px"><select id="smithyTroop">${all.filter(a => a.index).map(a => `<option value="t${a.index}">${esc(a.name)}</option>`).join("")}</select>
+        <label>to level <input type="number" id="smithyLevel" min="1" max="20" value="5"></label><button class="btn" id="btnSmithyAdd">Add</button></div></div>
+    <div class="card"><label><input type="checkbox" data-village="${esc(village.key)}" data-village-field="townHall" ${vs.townHall ? "checked" : ""}> Hold Town Hall celebrations in ${esc(village.name)}</label></div>
+    <p class="muted">Turn on “Train troops” (and Smithy / Town Hall) on the Dashboard for these rules to run.</p>`;
+}
+async function saveTroops() {
+  const troops = {};
+  document.querySelectorAll("[data-troop]").forEach(el => {
+    let value = el.dataset.kind === "bool" ? String(el.checked) : el.value;
+    if (el.dataset.troop.endsWith("max_queue_hours")) value = Number(value) > 0 ? String(Number(value)) : "no_limit";
+    troops[el.dataset.troop] = value;
+  });
+  await api("PUT", `/api/villages/${encodeURIComponent(selectedVillage)}`, { troops });
+}
+
+function renderHero() {
+  const hero = state.hero;
+  $("heroInfo").innerHTML = hero ? `<div class="res"><span>Status <b>${esc(hero.state)}</b></span><span>HP <b>${hero.hp ?? "?"}%</b></span>
+      <span>Adventures <b>${hero.adventures}</b></span></div>
+    ${hero.inventory ? `<div class="res" style="margin-top:6px"><span class="muted">Inventory</span><span>wood <b>${hero.inventory.wood}</b></span>
+      <span>clay <b>${hero.inventory.clay}</b></span><span>iron <b>${hero.inventory.iron}</b></span><span>crop <b>${hero.inventory.crop}</b></span></div>` : ""}`
+    : "Log in to read the hero.";
+}
+
+function renderFarming() {
+  if (document.activeElement && $("farmLists").contains(document.activeElement)) return;
+  const picked = new Set(state.settings.farmListNames);
+  $("farmLists").innerHTML = state.farmLists.length ? state.farmLists.map(list =>
+    `<div><label><input type="checkbox" data-farm="${esc(list.name)}" data-farm-id="${esc(list.listId ?? "")}" ${picked.has(list.name) ? "checked" : ""}>
+     ${esc(list.name)} <span class="muted">${esc(list.village ?? "")} · ${list.active}/${list.total} farms</span></label></div>`).join("")
+    : (picked.size ? `Selected: ${[...picked].map(esc).join(", ")}` : "No farm lists read yet. Log in and press “Read farm lists”.");
+}
+
+function renderFarmForms() {
+  if (document.activeElement && ($("farmCreate").contains(document.activeElement) || $("farmTargets").contains(document.activeElement))) return;
+  const troops = (catalog?.troops?.all || []).map(t => `<option>${esc(t.name)}</option>`).join("");
+  const villages = state.villages.map(v => `<option value="${esc(v.key)}">${esc(v.name)}</option>`).join("");
+  const lists = state.farmLists.map(l => `<option>${esc(l.name)}</option>`).join("");
+  const keep = id => $(id)?.value;
+  const kept = { fcName: keep("fcName"), fcVillage: keep("fcVillage"), fcTroop: keep("fcTroop"), fcCount: keep("fcCount"),
+    ftList: keep("ftList"), ftTroop: keep("ftTroop"), ftCount: keep("ftCount"), ftCoords: keep("ftCoords") };
+  $("farmCreate").innerHTML = `<label>Name <input type="text" id="fcName" placeholder="Farms 1"></label>
+    <label>Village <select id="fcVillage">${villages}</select></label>
+    <label>Default troops <select id="fcTroop">${troops}</select></label>
+    <label>× <input type="number" id="fcCount" min="1" max="10000" value="2"></label><button class="btn" id="btnFarmCreate">Create</button>`;
+  $("farmTargets").innerHTML = `<label>List <select id="ftList">${lists || "<option value=''>Read or create a list first</option>"}</select></label>
+    <label>Troops <select id="ftTroop">${troops}</select></label>
+    <label>× <input type="number" id="ftCount" min="1" max="10000" value="2"></label>
+    <input type="text" id="ftCoords" placeholder="12|-34 15|-30" style="flex:1;min-width:180px"><button class="btn" id="btnFarmTargets">Add targets</button>`;
+  for (const [id, value] of Object.entries(kept)) if (value && $(id)) $(id).value = value;
+}
+
+function renderAccounts() {
+  $("accountList").innerHTML = state.accounts.length ? `<table><tr><th>Name</th><th>Login</th><th>Server</th><th></th></tr>${state.accounts.map(a =>
+    `<tr><td>${esc(a.name)} ${a.name === state.activeAccount ? '<span class="pill">active</span>' : ""}</td><td>${esc(a.username)}${a.manualLogin ? ' <span class="pill">manual</span>' : ""}</td>
+     <td>${esc(a.serverName)} <span class="muted">${esc(a.serverUrl)}</span></td><td><button class="mini" data-acc-edit="${esc(a.name)}">Edit</button><button class="mini" data-acc-del="${esc(a.name)}">Delete</button></td></tr>`).join("")}</table>`
+    : '<div class="muted">No accounts yet. Add one below.</div>';
+}
+
+function renderPrompt() {
+  const prompt = state.prompt, dialog = $("promptDialog");
+  if (!prompt) { if (dialog.open) dialog.close(); shownPrompt = null; return; }
+  if (shownPrompt === prompt.id) return;
+  shownPrompt = prompt.id;
+  $("promptMessage").textContent = prompt.message;
+  $("promptOptions").innerHTML = prompt.options.map(o => `<button class="btn" data-prompt="${esc(o.value)}">${esc(o.label)}</button>`).join("");
+  if (!dialog.open) dialog.showModal();
+}
+
+let staticRenderedFor = null;
+async function refresh() {
+  state = await api("GET", "/api/state");
+  if (state.tribe !== catalogTribe) { catalog = await api("GET", "/api/catalog"); catalogTribe = state.tribe; }
+  const editing = document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
+  if (staticRenderedFor !== state.activeAccount || !editing) { renderStatic(); staticRenderedFor = state.activeAccount; }
+  renderHeader(); renderDashboard(); renderBuild(); renderTroops(); renderHero(); renderFarming(); renderFarmForms(); renderAccounts(); renderPrompt();
+}
+async function pollLogs() {
+  const lines = await api("GET", `/api/logs?after=${lastLogId}`);
+  if (!lines.length) return;
+  const box = $("logs");
+  for (const line of lines) {
+    lastLogId = line.id;
+    const row = document.createElement("div");
+    row.innerHTML = `<span class="t">${new Date(line.at).toLocaleTimeString()}</span> ${esc(line.text)}`;
+    if (/fail|error|blocked/i.test(line.text)) row.className = "bad";
+    box.appendChild(row);
+  }
+  while (box.children.length > 3000) box.removeChild(box.firstChild);
+  if ($("logFollow").checked) $("tab-logs").scrollTop = $("tab-logs").scrollHeight;
+}
+
+// ----- Actions -------------------------------------------------------------------------------
+$("nav").addEventListener("click", event => {
+  const tab = event.target.dataset.tab; if (!tab) return;
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b === event.target));
+  document.querySelectorAll("section").forEach(s => s.classList.toggle("active", s.id === `tab-${tab}`));
+});
+const post = path => async () => { showAlert(""); await api("POST", "/api/alert/clear"); await api("POST", path); refresh(); };
+$("btnLogin").onclick = post("/api/login"); $("btnStart").onclick = post("/api/start"); $("btnStop").onclick = post("/api/stop");
+$("btnLogout").onclick = post("/api/logout"); $("btnScan").onclick = post("/api/scan"); $("btnFarmRefresh").onclick = post("/api/farmlists/refresh");
+$("btnHeroRefresh").onclick = post("/api/hero/refresh"); $("btnEnglish").onclick = post("/api/language/english");
+$("btnClearLog").onclick = () => { $("logs").innerHTML = ""; };
+$("alert").onclick = async () => { showAlert(""); await api("POST", "/api/alert/clear"); };
+$("accountPicker").onchange = async event => { await api("POST", `/api/accounts/${encodeURIComponent(event.target.value)}/activate`); refresh(); };
+$("btnSaveAccount").onclick = async () => {
+  await api("POST", "/api/accounts", { name: $("accName").value, username: $("accUser").value, password: $("accPass").value,
+    serverUrl: $("accServer").value, manualLogin: $("accManual").checked, proxyEnabled: !!$("accProxy").value.trim(), proxyServer: $("accProxy").value });
+  $("accPass").value = ""; $("accountFormTitle").textContent = "Add account"; showAlert(""); refresh();
+};
+document.addEventListener("click", async event => {
+  const d = event.target.dataset;
+  if (d.pick) { selectedVillage = d.pick; document.activeElement?.blur(); renderBuild(); renderTroops(); }
+  else if (d.run) { await api("POST", "/api/jobs/run", { key: d.run }); refresh(); }
+  else if (d.prompt !== undefined) { await api("POST", "/api/prompt", { id: state.prompt.id, value: d.prompt }); $("promptDialog").close(); refresh(); }
+  else if (d.q) { await api("POST", `/api/villages/${encodeURIComponent(selectedVillage)}/build/${d.id}/${d.q}`); await refresh(); }
+  else if (d.add) { await addBuildItem(d.add); }
+  else if (d.accEdit) {
+    const a = state.accounts.find(x => x.name === d.accEdit);
+    $("accName").value = a.name; $("accUser").value = a.username; $("accServer").value = /lobby\.legends/.test(a.serverUrl) ? "" : a.serverUrl; $("accManual").checked = a.manualLogin;
+    $("accProxy").value = a.proxyEnabled ? a.proxyServer : ""; $("accPass").value = ""; $("accountFormTitle").textContent = `Edit account “${a.name}”`;
+  }
+  else if (d.accDel) { if (confirm(`Delete account “${d.accDel}”? Its saved login is removed.`)) { await api("DELETE", `/api/accounts/${encodeURIComponent(d.accDel)}`); refresh(); } }
+  else if (event.target.id === "btnFarmCreate") {
+    if (!$("fcName").value.trim()) return showAlert("Give the farm list a name.");
+    await api("POST", "/api/farmlists/create", { name: $("fcName").value, villageKey: $("fcVillage").value, troopType: $("fcTroop").value, troopCount: Number($("fcCount").value) });
+    $("fcName").value = ""; refresh();
+  }
+  else if (event.target.id === "btnFarmTargets") {
+    if (!$("ftList").value) return showAlert("Read or create a farm list first.");
+    await api("POST", "/api/farmlists/targets", { listName: $("ftList").value, troopType: $("ftTroop").value, troopCount: Number($("ftCount").value), coordinates: $("ftCoords").value });
+    $("ftCoords").value = ""; refresh();
+  }
+  else if (d.smithyRemove) { await saveSmithy(entries => entries.filter(([key]) => key !== d.smithyRemove)); }
+  else if (event.target.id === "btnSmithyAdd") {
+    const key = $("smithyTroop").value, level = $("smithyLevel").value;
+    await saveSmithy(entries => [...entries.filter(([k]) => k !== key), [key, level]]);
+  }
+});
+async function saveSmithy(change) {
+  const current = (state.settings.villages[selectedVillage]?.smithyTargets || "").split(";").filter(Boolean).map(e => e.split("="));
+  const smithyTargets = change(current).map(([k, v]) => `${k}=${v}`).join(";");
+  await api("PUT", `/api/villages/${encodeURIComponent(selectedVillage)}`, { smithyTargets });
+  document.activeElement?.blur(); await refresh();
+}
+async function addBuildItem(type) {
+  const picked = id => { const select = $(id), option = select.selectedOptions[0]; return { value: select.value, name: option?.dataset.name ?? "" }; };
+  let item = { type };
+  if (type === "resources_all") {
+    const types = [...document.querySelectorAll(".resType:checked")].map(i => i.value);
+    if (!types.length) return showAlert("Pick at least one resource type.");
+    item = { ...item, name: "Resource fields", targetLevel: Number($("allLevel").value), resourceTypes: types.join(",") };
+  } else if (type === "resource_field") {
+    const field = picked("fieldSlot"); if (!field.value) return showAlert("Scan the village first.");
+    item = { ...item, slotId: Number(field.value), name: field.name, targetLevel: Number($("fieldLevel").value) };
+  } else if (type === "building_upgrade") {
+    const building = picked("buildingSlot"); if (!building.value) return showAlert("Scan the village first.");
+    item = { ...item, slotId: Number(building.value), name: building.name, targetLevel: Number($("buildingLevel").value) };
+  } else {
+    const building = picked("constructGid"), slot = $("constructSlot").value;
+    if (!slot || !building.value) return showAlert("Scan the village first so empty slots are known.");
+    item = { ...item, slotId: Number(slot), gid: Number(building.value), name: building.name, targetLevel: Number($("constructLevel").value) };
+  }
+  await api("POST", `/api/villages/${encodeURIComponent(selectedVillage)}/build`, item);
+  document.activeElement?.blur(); await refresh();
+}
+
+refresh().catch(() => {});
+setInterval(() => refresh().catch(() => {}), 1500);
+setInterval(() => pollLogs().catch(() => {}), 1000);
+</script>
+</body>
+</html>

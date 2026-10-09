@@ -123,6 +123,12 @@ public sealed partial class BrowserSession
             return false;
         }
 
+        if (!OperatingSystem.IsWindows())
+        {
+            // macOS ships chrome-mac*/…/*.app, Linux ships chrome-linux*/chrome.
+            return Directory.GetDirectories(browserRoot, "chrome-*").Length > 0;
+        }
+
         return Directory.GetFiles(browserRoot, "chrome.exe", SearchOption.AllDirectories)
             .Any(path => Path.GetFileName(Path.GetDirectoryName(path))?
                 .StartsWith("chrome-win", StringComparison.OrdinalIgnoreCase) == true);
