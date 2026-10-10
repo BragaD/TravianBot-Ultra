@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
 using TbotUltra.Core.Configuration;
@@ -36,6 +37,23 @@ public sealed record HeroView(string State, int? Hp, int Adventures, HeroInvento
 
 public sealed record JobView(string Key, string Title, DateTimeOffset DueUtc, string LastResult);
 
+public sealed record ScanRow(int X, int Y, string Kind, string Detail, double? Distance, bool IsOasis);
+
+public sealed record ScanView(string Title, string Status, bool Running, List<ScanRow> Rows);
+
+public sealed record CatapultSetupView(Dictionary<string, long> AvailableTroops, int? RallyPointLevel, DateTimeOffset UpdatedUtc);
+
+public sealed record CatapultPlan(
+    string VillageKey,
+    int X,
+    int Y,
+    int WaveCount,
+    bool Raid,
+    Dictionary<string, int> FirstAttackTroops,
+    Dictionary<string, int> WaveTroops,
+    string? Target1,
+    string? Target2);
+
 public sealed record PromptOption(string Value, string Label);
 
 public sealed record PromptView(string Id, string Kind, string Message, List<PromptOption> Options);
@@ -47,6 +65,9 @@ public sealed record PromptView(string Id, string Kind, string Message, List<Pro
 public sealed class BotEngine
 {
     private static readonly TimeSpan MaxDeferral = TimeSpan.FromHours(6);
+
+    // Not an engine task: the loop runs the two inbox calls itself.
+    private const string MarkReadTask = "mark_inbox_read";
 
     private readonly object _sync = new();
     private readonly string _root;
@@ -67,6 +88,8 @@ public sealed class BotEngine
     private CancellationTokenSource? _loopCancellation;
     private Task? _loopTask;
     private CancellationTokenSource? _manualCancellation;
+    private ScanView? _scan;
+    private CatapultSetupView? _catapultSetup;
     private PromptView? _prompt;
     private TaskCompletionSource<string?>? _promptAnswer;
 
@@ -104,6 +127,10 @@ public sealed class BotEngine
     public PromptView? Prompt => _prompt;
 
     public HeroView? Hero => _hero;
+
+    public ScanView? Scan => _scan;
+
+    public CatapultSetupView? CatapultSetup => _catapultSetup;
 
     public IReadOnlyList<FarmListView> FarmLists => _farmLists;
 
@@ -275,6 +302,162 @@ public sealed class BotEngine
                 $"The game did not accept {result.FailedCount} target(s) for '{listName}'. It can refuse small raids — try a larger troop count.");
         }
     });
+
+    public Task MarkInboxReadAsync() => RunManualAsync("Marking messages and reports as read", async cancellationToken =>
+    {
+        var account = RequireActiveAccount();
+        await MarkInboxReadCoreAsync(BuildOptions(account, _settings.Load(account.Name)), cancellationToken);
+    });
+
+    private async Task MarkInboxReadCoreAsync(BotOptions options, CancellationToken cancellationToken)
+    {
+        await _runner.MarkMessagesAsReadAsync(options, Log, cancellationToken: cancellationToken);
+        await _runner.MarkReportsAsReadAsync(options, Log, cancellationToken: cancellationToken);
+    }
+
+    public Task RunAdventureBonusAsync(string kind) => RunManualAsync("Watching adventure bonus video", async cancellationToken =>
+    {
+        var account = RequireActiveAccount();
+        // A manual "watch now" must not be skipped by the random chance gate used for automatic runs.
+        var options = BuildOptions(account, _settings.Load(account.Name)) with { HeroAdventureVideoChancePercent = 100 };
+        var result = kind == "hard"
+            ? await _runner.RunIncreaseAdventuresToHardAsync(options, Log, cancellationToken: cancellationToken)
+            : await _runner.RunReduceAdventuresTimeAsync(options, Log, cancellationToken: cancellationToken);
+        Log($"[mac] adventure bonus ({kind}): {result}");
+    });
+
+    public Task RunProductionBonusAsync() => RunManualAsync("Activating +15% production", async cancellationToken =>
+    {
+        var account = RequireActiveAccount();
+        var options = BuildOptions(account, _settings.Load(account.Name)) with { ProductionBonusVideoEnabled = true };
+        var result = await _runner.RunActivateProductionBonusVideosAsync(options, Log, cancellationToken: cancellationToken);
+        Log($"[mac] +15% production: {result.Message}");
+    });
+
+    public Task ScanOasesAsync(int centerX, int centerY, int radius, bool includeOccupied, IReadOnlyCollection<string> types) => RunManualAsync("Scanning oases", async cancellationToken =>
+    {
+        var account = RequireActiveAccount();
+        var options = BuildOptions(account, _settings.Load(account.Name));
+        var title = $"Oases within {radius} fields of ({centerX}|{centerY})";
+        _scan = new ScanView(title, "Starting…", true, []);
+        try
+        {
+            var progress = new Progress<MapOasisScanProgress>(update =>
+                _scan = new ScanView(title, $"Map areas {update.CompletedAreas}/{update.TotalAreas}, {update.OasisCount} oases so far", true, []));
+            var result = await _runner.ScanMapOasesAsync(
+                options,
+                includeOccupied,
+                types,
+                new MapOasisScanRequest(centerX, centerY, MapOasisScanScope.Radius, Math.Clamp(radius, 1, 200), MapOasisScanSpeed.Normal),
+                Log,
+                progress,
+                cancellationToken: cancellationToken);
+            var rows = result.Oases
+                .Select(oasis => new ScanRow(
+                    oasis.X,
+                    oasis.Y,
+                    oasis.OasisType,
+                    oasis.IsOccupied ? $"occupied by {oasis.OwnerPlayer}" : string.IsNullOrWhiteSpace(oasis.Animals) ? "no animals" : oasis.Animals,
+                    Math.Round(Math.Sqrt(Math.Pow(oasis.X - centerX, 2) + Math.Pow(oasis.Y - centerY, 2)), 1),
+                    IsOasis: true))
+                .OrderBy(row => row.Distance)
+                .ToList();
+            _scan = new ScanView(title, $"{rows.Count} oases found{(result.IsPartialResult ? " (partial result)" : string.Empty)}", false, rows);
+        }
+        catch
+        {
+            _scan = new ScanView(title, "Scan stopped.", false, _scan?.Rows ?? []);
+            throw;
+        }
+    });
+
+    public Task SearchTravcoAsync(int x, int y, int daysInactive, string orderBy) => RunManualAsync("Searching Travco for inactive villages", async cancellationToken =>
+    {
+        var account = RequireActiveAccount();
+        var options = BuildOptions(account, _settings.Load(account.Name));
+        var title = $"Inactive villages near ({x}|{y}), {daysInactive}+ days";
+        _scan = new ScanView(title, "Opening Travco…", true, []);
+        try
+        {
+            var searchProgress = new Progress<TravcoSearchProgress>(update =>
+                _scan = new ScanView(title, update.Status, true, []));
+            await _runner.OpenTravcoAndSearchAsync(options, new TravcoSearchRequest(x, y, daysInactive, orderBy), Log, searchProgress, cancellationToken);
+            var pageProgress = new Progress<(int CurrentPage, int TotalPages)>(update =>
+                _scan = new ScanView(title, $"Reading page {update.CurrentPage}/{update.TotalPages}", true, []));
+            var result = await _runner.ScrapeAllTravcoPagesAsync(Log, pageProgress, cancellationToken);
+            var rows = new List<ScanRow>();
+            foreach (var row in result.Rows)
+            {
+                var coordinates = Regex.Match(row.Coordinates ?? string.Empty, @"(-?\d+)\D+(-?\d+)");
+                if (coordinates.Success)
+                {
+                    rows.Add(new ScanRow(
+                        int.Parse(coordinates.Groups[1].Value, CultureInfo.InvariantCulture),
+                        int.Parse(coordinates.Groups[2].Value, CultureInfo.InvariantCulture),
+                        row.Village,
+                        $"{row.Account}, pop {row.Pop?.ToString(CultureInfo.InvariantCulture) ?? "?"}",
+                        row.Distance,
+                        IsOasis: false));
+                }
+            }
+
+            _scan = new ScanView(title, $"{rows.Count} inactive villages found", false, rows);
+        }
+        catch
+        {
+            _scan = new ScanView(title, "Search stopped.", false, _scan?.Rows ?? []);
+            throw;
+        }
+        finally
+        {
+            await _runner.CloseTravcoTabAsync(Log);
+        }
+    });
+
+    public Task ReadCatapultSetupAsync(string villageKey) => RunManualAsync("Reading troops for catapult waves", async cancellationToken =>
+    {
+        var account = RequireActiveAccount();
+        var setup = await _runner.ReadCatapultWaveSetupInfoAsync(
+            BuildVillageOptions(account, villageKey), Log, forceRefresh: true, cancellationToken: cancellationToken);
+        _catapultSetup = new CatapultSetupView(
+            setup.AvailableTroops.ToDictionary(pair => pair.Key, pair => pair.Value), setup.RallyPointLevel, DateTimeOffset.UtcNow);
+    });
+
+    public Task StartCatapultWavesAsync(CatapultPlan plan) => RunManualAsync("Sending catapult waves", async cancellationToken =>
+    {
+        var account = RequireActiveAccount();
+        var request = new CatapultWaveRequest(
+            plan.X,
+            plan.Y,
+            Math.Clamp(plan.WaveCount, 0, CatapultWaveLimits.MaxWaveCount),
+            plan.Raid,
+            plan.FirstAttackTroops,
+            plan.WaveTroops,
+            string.IsNullOrWhiteSpace(plan.Target1) ? null : plan.Target1,
+            string.IsNullOrWhiteSpace(plan.Target2) ? null : plan.Target2);
+        var result = await _runner.StartCatapultWavesAsync(
+            BuildVillageOptions(account, plan.VillageKey),
+            request,
+            Log,
+            async (preparedCount, token) => await AskAsync(
+                "confirm",
+                $"{preparedCount} attack(s) are prepared against ({plan.X}|{plan.Y}). Send them now?",
+                [new PromptOption("ok", "Send all"), new PromptOption(string.Empty, "Cancel")],
+                token) == "ok",
+            cancellationToken: cancellationToken);
+        Log($"[mac] catapult waves: sent {result.SentCount}/{result.TotalAttacks}, failed {result.FailedCount}.");
+    });
+
+    private BotOptions BuildVillageOptions(AccountEntry account, string villageKey)
+    {
+        var village = Villages(account.Name).FirstOrDefault(item => item.Key == villageKey)
+            ?? throw new InvalidOperationException("Unknown village.");
+        return BuildOptions(account, _settings.Load(account.Name)) with
+        {
+            TargetVillageName = village.Name,
+            TargetVillageUrl = village.Url ?? string.Empty,
+        };
+    }
 
     public Task RefreshHeroAsync() => RunManualAsync("Reading hero inventory", async cancellationToken =>
     {
@@ -462,6 +645,13 @@ public sealed class BotEngine
         var options = BotOptionsPayloadApplier.Apply(BuildOptions(account, settings), job.Payload);
         try
         {
+            if (job.Task == MarkReadTask)
+            {
+                await MarkInboxReadCoreAsync(options, cancellationToken);
+                Schedule(job.Key, job.SuccessInterval(), "Messages and reports marked as read.");
+                return;
+            }
+
             if (job.Task == "send_farmlists")
             {
                 // The game only lets Gold Club accounts start a farm list. Without it the engine sends the
@@ -619,6 +809,17 @@ public sealed class BotEngine
             return;
         }
 
+        if (message.Contains("could not start demolition", StringComparison.OrdinalIgnoreCase))
+        {
+            UpdateBuildItem(accountName, job, item =>
+            {
+                item.Status = "blocked";
+                item.Note = "The game did not offer demolition. It needs Main Building level 10.";
+            });
+            Schedule(job.Key, TimeSpan.FromSeconds(20), message);
+            return;
+        }
+
         if (outcome == ConstructionTaskOutcome.MissingBuilding)
         {
             UpdateBuildItem(accountName, job, item =>
@@ -730,6 +931,29 @@ public sealed class BotEngine
             jobs.Add(new Job("collect_daily_quests", "Collect daily quests", "collect_daily_quests", empty, 180, 300));
         }
 
+        if (features.MarkRead)
+        {
+            jobs.Add(new Job("mark_read", "Mark messages and reports as read", MarkReadTask, empty, 60, 120));
+        }
+
+        if (features.ProductionBonus)
+        {
+            var payload = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [BotOptionPayloadKeys.ProductionBonusVideoEnabled] = "true" };
+            jobs.Add(new Job("production_bonus", "+15% production bonus videos", "activate_production_bonus", payload, 120, 240));
+        }
+
+        if (features.ResourceTransfer)
+        {
+            var payload = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [BotOptionPayloadKeys.ResourceTransferEnabled] = "true" };
+            jobs.Add(new Job("resource_transfer", "Send resources between villages", "send_resources_between_villages", payload, 20, 40));
+        }
+
+        if (features.Reinforcements)
+        {
+            var payload = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [BotOptionPayloadKeys.ReinforcementsEnabled] = "true" };
+            jobs.Add(new Job("reinforcements", "Send reinforcements between villages", "send_reinforcements_between_villages", payload, 30, 60));
+        }
+
         foreach (var village in Villages(accountName))
         {
             if (!settings.Villages.TryGetValue(village.Key, out var villageSettings) || !villageSettings.Enabled)
@@ -779,6 +1003,11 @@ public sealed class BotEngine
                 jobs.Add(new Job($"smithy:{village.Key}", $"Smithy upgrades in {village.Name}", "upgrade_troops_at_smithy", payload, 30, 60, village.Key));
             }
 
+            if (features.Brewery && villageSettings.Brewery)
+            {
+                jobs.Add(new Job($"brewery:{village.Key}", $"Brewery celebration in {village.Name}", "run_brewery_celebration", target, 30, 60, village.Key));
+            }
+
             if (features.TownHall && villageSettings.TownHall)
             {
                 jobs.Add(new Job($"townhall:{village.Key}", $"Town Hall celebration in {village.Name}", "run_town_hall_celebration", target, 30, 60, village.Key));
@@ -811,6 +1040,16 @@ public sealed class BotEngine
                 payload[BotOptionPayloadKeys.BuildingUpgradeTargetLevel] = level;
                 payload[BotOptionPayloadKeys.BuildingUpgradeName] = item.Name;
                 break;
+            case "building_max" when item.SlotId.HasValue:
+                task = "upgrade_building_to_max";
+                payload[BotOptionPayloadKeys.BuildingUpgradeSlotId] = item.SlotId.Value.ToString(CultureInfo.InvariantCulture);
+                payload[BotOptionPayloadKeys.BuildingUpgradeName] = item.Name;
+                break;
+            case "building_demolish" when item.SlotId.HasValue:
+                task = "demolish_building_to_level";
+                payload[BotOptionPayloadKeys.TargetBuildingSlotOrName] = item.SlotId.Value.ToString(CultureInfo.InvariantCulture);
+                payload[BotOptionPayloadKeys.TargetLevel] = level;
+                break;
             case "building_construct" when item.SlotId.HasValue && item.Gid.HasValue:
                 task = "construct_building";
                 payload[BotOptionPayloadKeys.BuildingConstructSlotId] = item.SlotId.Value.ToString(CultureInfo.InvariantCulture);
@@ -830,6 +1069,8 @@ public sealed class BotEngine
         "resources_all" => $"All resource fields to level {item.TargetLevel}",
         "resource_field" => $"{item.Name} (slot {item.SlotId}) to level {item.TargetLevel}",
         "building_construct" => $"Construct {item.Name} in slot {item.SlotId} to level {item.TargetLevel}",
+        "building_max" => $"{item.Name} (slot {item.SlotId}) to max level",
+        "building_demolish" => $"Demolish {item.Name} (slot {item.SlotId}) to level {item.TargetLevel}",
         _ => $"{item.Name} (slot {item.SlotId}) to level {item.TargetLevel}",
     };
 
@@ -855,9 +1096,17 @@ public sealed class BotEngine
     private BotOptions BuildOptions(AccountEntry account, MacSettings settings)
     {
         var overrides = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in settings.Options)
+        foreach (var pair in MacDefaults.Options)
         {
             overrides[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in settings.Options)
+        {
+            if (!TryExpandJsonList(pair.Key, pair.Value, overrides))
+            {
+                overrides[pair.Key] = pair.Value;
+            }
         }
 
         overrides["base_url"] = account.ServerUrl;
@@ -878,6 +1127,44 @@ public sealed class BotEngine
             .AddInMemoryCollection(overrides)
             .Build();
         return BotOptionsFactory.FromConfiguration(configuration);
+    }
+
+    // List-valued engine options (source villages, reinforcement rules) are stored as a JSON array and
+    // expanded to the "key:index[:property]" form the configuration binder reads.
+    private static bool TryExpandJsonList(string key, string value, Dictionary<string, string?> target)
+    {
+        if (!value.TrimStart().StartsWith('['))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            var index = 0;
+            foreach (var element in document.RootElement.EnumerateArray())
+            {
+                if (element.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var property in element.EnumerateObject())
+                    {
+                        target[$"{key}:{index}:{property.Name}"] = property.Value.ToString();
+                    }
+                }
+                else
+                {
+                    target[$"{key}:{index}"] = element.ToString();
+                }
+
+                index++;
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private AccountEntry RequireActiveAccount()

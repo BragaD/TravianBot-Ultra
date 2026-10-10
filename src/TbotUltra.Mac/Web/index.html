@@ -68,6 +68,8 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
     <button data-tab="troops">Troops</button>
     <button data-tab="hero">Hero</button>
     <button data-tab="farming">Farming</button>
+    <button data-tab="transfers">Transfers</button>
+    <button data-tab="catapults">Catapults</button>
     <button data-tab="settings">Settings</button>
     <button data-tab="accounts">Accounts</button>
     <button data-tab="logs">Log</button>
@@ -93,6 +95,12 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   <section id="tab-hero">
     <div class="card"><div class="row"><h2 style="margin:0;flex:1">Hero</h2><button class="btn" id="btnHeroRefresh">Read hero inventory</button></div><div id="heroInfo" class="muted" style="margin-top:8px">Log in to read the hero.</div></div>
     <div class="card"><h2>Adventures</h2><div class="row" id="heroOptions"></div></div>
+    <div class="card"><h2>Attribute points</h2>
+      <p class="muted" style="margin-top:0">Free points go to the first attribute until it reaches its maximum, then the next one.</p>
+      <div id="heroStats"></div></div>
+    <div class="card"><h2>Adventure bonus videos</h2><div class="row" id="heroVideoOptions"></div>
+      <div class="row" style="margin-top:8px"><button class="btn" data-post="/api/hero/bonus/hard">Watch “hard adventure” video now</button>
+        <button class="btn" data-post="/api/hero/bonus/time">Watch “shorter adventure” video now</button></div></div>
     <div class="card"><h2>Hero inventory resources</h2>
       <p class="muted" style="margin-top:0">When a build or upgrade is short on resources, the bot can move wood, clay, iron and crop from the hero's inventory into the village.</p>
       <div class="row" id="heroResourceOptions"></div></div>
@@ -102,13 +110,37 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
     <div class="card"><h2>Farm lists</h2><div class="row" id="farmOptions"></div></div>
     <div class="card"><div class="row"><h2 style="margin:0;flex:1">Lists to send</h2><button class="btn" id="btnFarmRefresh">Read farm lists</button></div>
       <p class="muted">Leave every list unticked to send all lists.</p><div id="farmLists" class="muted">No farm lists read yet.</div></div>
+    <div class="card"><h2>Targets with losses</h2>
+      <p class="muted" style="margin-top:0">Before each send, targets whose last raid lost troops can be switched off or moved to another list.</p>
+      <div id="farmLossOptions"></div></div>
     <div class="card"><h2>Create a farm list</h2><div class="row" id="farmCreate"></div></div>
     <div class="card"><h2>Add targets to a list</h2><div class="row" id="farmTargets"></div>
       <p class="muted">Coordinates like <code>12|-34</code>, separated by spaces or new lines. Each target is raided with the troops chosen here.</p></div>
+    <div class="card"><h2>Find targets</h2>
+      <h3>Oasis scan</h3><div class="row" id="oasisForm"></div>
+      <h3>Travco inactive villages</h3><div class="row" id="travcoForm"></div></div>
+    <div class="card"><h2 id="scanTitle">Search results</h2><div id="scanStatus" class="muted">No search run yet.</div>
+      <div class="row" id="scanActions" style="margin:8px 0"></div><div id="scanRows" style="max-height:340px;overflow:auto"></div></div>
+  </section>
+
+  <section id="tab-transfers">
+    <div class="card"><h2>Send resources between own villages</h2><div id="transferForm"></div></div>
+    <div class="card"><h2>Send reinforcements between own villages</h2><div id="reinforceForm"></div></div>
+    <p class="muted">Turn on “Resource transfers” / “Reinforcements” on the Dashboard for these to run on the bot's schedule.</p>
+  </section>
+
+  <section id="tab-catapults">
+    <div class="card"><h2>Catapult waves</h2><div id="catapultForm"></div></div>
   </section>
 
   <section id="tab-settings">
     <div class="card"><h2>Construction</h2><div class="row" id="constructionOptions"></div></div>
+    <div class="card"><h2>NPC trade</h2>
+      <p class="muted" style="margin-top:0">NPC trading costs gold. It only runs when gold spending is allowed below.</p>
+      <div class="row" id="npcOptions"></div><div class="row" id="goldOptions" style="margin-top:8px"></div></div>
+    <div class="card"><h2>Bonus videos</h2><div class="row" id="videoOptions"></div>
+      <div class="row" style="margin-top:8px"><button class="btn" data-post="/api/production-bonus">Activate +15% production now</button></div></div>
+    <div class="card"><h2>Messages and reports</h2><button class="btn" data-post="/api/inbox/read">Mark all as read now</button></div>
     <div class="card"><h2>Pacing</h2><div class="row" id="pacingOptions"></div></div>
     <div class="card"><h2>Game language</h2><p class="muted" style="margin-top:0">The game must be set to English for the bot to read pages.</p><button class="btn" id="btnEnglish">Set game language to English</button></div>
     <div class="card"><h2>Data</h2><div class="muted" id="dataRoot"></div></div>
@@ -167,7 +199,7 @@ function when(iso) {
   if (seconds < 5400) return `in ${Math.round(seconds / 60)} min`;
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
-const opt = (key, fallback) => (state.settings.options[key] ?? fallback);
+const opt = (key, fallback) => (state.settings.options[key] ?? state.defaults[key] ?? fallback);
 
 // ----- Option controls: every control writes one engine option key -----------------------------
 function boolOption(key, label, fallback) {
@@ -193,6 +225,11 @@ document.addEventListener("change", async event => {
   } else if (el.dataset.farm !== undefined) {
     const picked = [...document.querySelectorAll("[data-farm]:checked")];
     await api("PUT", "/api/settings/farmlists", { names: picked.map(i => i.dataset.farm), ids: picked.map(i => i.dataset.farmId).filter(Boolean) });
+  } else if (el.classList.contains("statMax")) {
+    await saveHeroStats($("heroStats").dataset.order.split(","));
+  } else if (el.dataset.lossDest) {
+    const color = el.dataset.lossDest, name = el.selectedOptions[0]?.textContent ?? "";
+    await setOptions({ [`continuous_farm_${color}_loss_destination_list_id`]: el.value, [`continuous_farm_${color}_loss_destination_list_name`]: el.value ? name : "" });
   } else if (el.dataset.troop) {
     await saveTroops();
   } else if (el.dataset.village) {
@@ -203,7 +240,9 @@ document.addEventListener("change", async event => {
 
 // ----- Rendering -----------------------------------------------------------------------------
 const FEATURES = [["construction", "Building"], ["hero", "Hero adventures"], ["heroResources", "Use hero inventory resources"],
-  ["farming", "Farm lists"], ["troops", "Train troops"], ["smithy", "Smithy upgrades"], ["townHall", "Town Hall celebrations"],
+  ["farming", "Farm lists"], ["troops", "Train troops"], ["smithy", "Smithy upgrades"], ["townHall", "Town Hall celebrations"], ["brewery", "Brewery celebrations"],
+  ["resourceTransfer", "Resource transfers"], ["reinforcements", "Reinforcements"], ["productionBonus", "+15% production videos"],
+  ["markRead", "Mark messages/reports read"],
   ["collectTasks", "Collect task rewards"], ["collectDailyQuests", "Collect daily quests"]];
 
 function renderStatic() {
@@ -228,6 +267,29 @@ function renderStatic() {
   $("constructionOptions").innerHTML = [
     selectOption("resource_build_strategy", "Resource field order", "lowest_first", [["lowest_first", "Lowest level first"], ["smart", "Smart (by need)"]]),
     boolOption("construction_humanize_delay_enabled", "Random delay before queueing the next build", false)].join("");
+  $("heroVideoOptions").innerHTML = [
+    boolOption("increase_adventures_to_hard", "Raise adventures to hard before sending", false),
+    boolOption("reduce_adventure_time", "Shorten adventure time by 25%", false),
+    numberOption("hero_adventure_video_chance_percent", "Chance to watch %", 70, 0, 100)].join("");
+  $("npcOptions").innerHTML = [
+    boolOption("npc_trade_enabled", "For troop training", false),
+    boolOption("npc_trade_construction_enabled", "For construction", false),
+    numberOption("npc_trade_threshold_percent", "When storage is filled to %", 90, 1, 100),
+    boolOption("npc_trade_analyze_wood", "wood", true), boolOption("npc_trade_analyze_clay", "clay", true),
+    boolOption("npc_trade_analyze_iron", "iron", true), boolOption("npc_trade_analyze_crop", "crop", true),
+    boolOption("npc_trade_build_time_limit_enabled", "Skip short builds", true),
+    numberOption("npc_trade_build_time_limit_seconds", "shorter than (seconds)", 300, 0, 86400)].join("");
+  $("goldOptions").innerHTML = [
+    boolOption("allow_gold_spending", "Allow spending gold", false),
+    numberOption("gold_limit", "Keep at least this much gold", 100, 0, 100000),
+    numberOption("daily_gold_spending_limit", "Daily gold limit", 20, 0, 100000)].join("");
+  $("videoOptions").innerHTML = [
+    boolOption("construct_faster_enabled", "Watch the “25% faster build” video", true),
+    boolOption("construct_faster_min_build_time_enabled", "only for builds longer than", true),
+    numberOption("construct_faster_min_build_minutes", "minutes", 30, 1, 1440),
+    boolOption("construct_faster_random_enabled", "only sometimes", false),
+    numberOption("construct_faster_random_chance_percent", "chance %", 50, 1, 100),
+    boolOption("turn_off_video_sound", "Mute videos", true)].join("");
   $("pacingOptions").innerHTML = [
     boolOption("action_pacing_enabled", "Human-like pauses between clicks and page loads", true)].join("");
   $("dataRoot").textContent = `Accounts, settings and logs are stored in ${state.dataRoot}`;
@@ -278,6 +340,8 @@ function villageTabs(containerId) {
 function describeItem(item) {
   if (item.type === "resources_all") return `All resource fields (${item.resourceTypes}) to level ${item.targetLevel}`;
   if (item.type === "building_construct") return `Construct ${item.name} in slot ${item.slotId} → level ${item.targetLevel}`;
+  if (item.type === "building_max") return `${item.name} (slot ${item.slotId}) → max level`;
+  if (item.type === "building_demolish") return `Demolish ${item.name} (slot ${item.slotId}) → level ${item.targetLevel}`;
   return `${item.name} (slot ${item.slotId}) → level ${item.targetLevel}`;
 }
 
@@ -310,7 +374,12 @@ function renderBuild() {
         <label>to level <input type="number" id="fieldLevel" min="1" max="25" value="5"></label><button class="btn" data-add="resource_field">Add</button></div>
       <h3>Upgrade a building</h3>
       <div class="row"><select id="buildingSlot">${buildings || "<option value=''>Scan the village first</option>"}</select>
-        <label>to level <input type="number" id="buildingLevel" min="1" max="20" value="5"></label><button class="btn" data-add="building_upgrade">Add</button></div>
+        <label>to level <input type="number" id="buildingLevel" min="1" max="20" value="5"></label><button class="btn" data-add="building_upgrade">Add</button>
+        <button class="btn" data-add="building_max">Add “to max level”</button></div>
+      <h3>Demolish a building</h3>
+      <div class="row"><select id="demolishSlot">${buildings || "<option value=''>Scan the village first</option>"}</select>
+        <label>down to level <input type="number" id="demolishLevel" min="0" max="19" value="0"></label><button class="btn danger" data-add="building_demolish">Add</button>
+        <span class="muted">Needs Main Building level 10.</span></div>
       <h3>Construct a new building</h3>
       <div class="row"><select id="constructGid">${catalogOptions}</select>
         <label>in <select id="constructSlot">${emptySlots || "<option value=''>No empty slot known</option>"}</select></label>
@@ -357,8 +426,9 @@ function renderTroops() {
     <div class="card"><h2>Smithy upgrades — ${esc(village.name)}</h2><div class="row">${smithyRows || '<span class="muted">No smithy targets.</span>'}</div>
       <div class="row" style="margin-top:8px"><select id="smithyTroop">${all.filter(a => a.index).map(a => `<option value="t${a.index}">${esc(a.name)}</option>`).join("")}</select>
         <label>to level <input type="number" id="smithyLevel" min="1" max="20" value="5"></label><button class="btn" id="btnSmithyAdd">Add</button></div></div>
-    <div class="card"><label><input type="checkbox" data-village="${esc(village.key)}" data-village-field="townHall" ${vs.townHall ? "checked" : ""}> Hold Town Hall celebrations in ${esc(village.name)}</label></div>
-    <p class="muted">Turn on “Train troops” (and Smithy / Town Hall) on the Dashboard for these rules to run.</p>`;
+    <div class="card"><label><input type="checkbox" data-village="${esc(village.key)}" data-village-field="townHall" ${vs.townHall ? "checked" : ""}> Hold Town Hall celebrations in ${esc(village.name)}</label>
+      <label style="margin-left:18px"><input type="checkbox" data-village="${esc(village.key)}" data-village-field="brewery" ${vs.brewery ? "checked" : ""}> Hold Brewery celebrations (Teutons, capital only)</label></div>
+    <p class="muted">Turn on “Train troops” (and Smithy / Town Hall / Brewery) on the Dashboard for these rules to run.</p>`;
 }
 async function saveTroops() {
   const troops = {};
@@ -430,7 +500,7 @@ async function refresh() {
   if (state.tribe !== catalogTribe) { catalog = await api("GET", "/api/catalog"); catalogTribe = state.tribe; }
   const editing = document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
   if (staticRenderedFor !== state.activeAccount || !editing) { renderStatic(); staticRenderedFor = state.activeAccount; }
-  renderHeader(); renderDashboard(); renderBuild(); renderTroops(); renderHero(); renderFarming(); renderFarmForms(); renderAccounts(); renderPrompt();
+  renderHeader(); renderDashboard(); renderBuild(); renderTroops(); renderHero(); renderHeroStats(); renderFarming(); renderFarmLoss(); renderFarmForms(); renderScan(); renderTransfers(); renderCatapults(); renderAccounts(); renderPrompt();
 }
 async function pollLogs() {
   const lines = await api("GET", `/api/logs?after=${lastLogId}`);
@@ -465,8 +535,181 @@ $("btnSaveAccount").onclick = async () => {
     serverUrl: $("accServer").value, manualLogin: $("accManual").checked, proxyEnabled: !!$("accProxy").value.trim(), proxyServer: $("accProxy").value });
   $("accPass").value = ""; $("accountFormTitle").textContent = "Add account"; showAlert(""); refresh();
 };
+async function setOptions(values) {
+  Object.assign(state.settings.options, values);
+  await api("PUT", "/api/settings/options", values);
+}
+const listOpt = key => { try { return JSON.parse(opt(key, "[]")); } catch { return []; } };
+const editingIn = id => document.activeElement && $(id).contains(document.activeElement) && document.activeElement.tagName !== "BUTTON";
+const villageOptions = selected => state.villages.map(v => `<option ${v.name === selected ? "selected" : ""}>${esc(v.name)}</option>`).join("");
+const troopOptions = selected => (catalog?.troops?.all || []).map(t => `<option ${t.name === selected ? "selected" : ""}>${esc(t.name)}</option>`).join("");
+
+// ----- Hero attribute points -----------------------------------------------------------------
+const STATS = [["resources", "Resources"], ["fighting_strength", "Fighting strength"], ["offence_bonus", "Offence bonus"], ["defence_bonus", "Defence bonus"]];
+function renderHeroStats() {
+  if (editingIn("heroStats")) return;
+  const order = String(opt("hero_stat_priority", STATS.map(x => x[0]).join(","))).split(",").filter(k => STATS.some(x => x[0] === k));
+  for (const [key] of STATS) if (!order.includes(key)) order.push(key);
+  const maximums = Object.fromEntries(String(opt("hero_stat_maximums", "")).split(",").filter(Boolean).map(part => part.split("=")));
+  $("heroStats").innerHTML = `<table><tr><th>#</th><th>Attribute</th><th>Maximum points</th><th></th></tr>${order.map((key, i) =>
+    `<tr><td>${i + 1}</td><td>${STATS.find(x => x[0] === key)[1]}</td>
+     <td><input type="number" class="statMax" data-stat="${key}" min="0" max="100" value="${esc(maximums[key] ?? 100)}"></td>
+     <td><button class="mini" data-stat-move="${key}" data-dir="-1">↑</button><button class="mini" data-stat-move="${key}" data-dir="1">↓</button></td></tr>`).join("")}</table>`;
+  $("heroStats").dataset.order = order.join(",");
+}
+async function saveHeroStats(order) {
+  const maximums = [...document.querySelectorAll(".statMax")].map(i => `${i.dataset.stat}=${Math.max(0, Math.min(100, Number(i.value) || 0))}`).join(",");
+  await setOptions({ hero_stat_priority: order.join(","), hero_stat_maximums: maximums, hero_auto_assign_points: "true" });
+  document.activeElement?.blur(); renderHeroStats();
+}
+
+// ----- Farm loss handling ---------------------------------------------------------------------
+function renderFarmLoss() {
+  if (editingIn("farmLossOptions")) return;
+  const destination = color => `<select data-loss-dest="${color}"><option value="">(choose a list)</option>${state.farmLists.map(l =>
+    `<option value="${esc(l.listId ?? "")}" ${l.name === opt(`continuous_farm_${color}_loss_destination_list_name`, "") ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select>`;
+  const row = (color, label) => `<div class="row" style="margin-bottom:6px"><b style="width:150px">${label}</b>
+    ${boolOption(`continuous_farm_deactivate_${color}_losses`, "Switch off villages", true)}
+    ${boolOption(`continuous_farm_deactivate_${color}_oasis_losses`, "Switch off oases", false)}
+    ${boolOption(`continuous_farm_move_${color}_losses`, "Move instead to", false)} ${destination(color)}</div>`;
+  $("farmLossOptions").innerHTML = row("red", "Heavy losses (red)") + row("yellow", "Some losses (yellow)");
+}
+
+// ----- Target search ---------------------------------------------------------------------------
+const OASIS_TYPES = ["Wood", "Clay", "Iron", "Crop", "Wood+Crop", "Clay+Crop", "Iron+Crop"];
+let scanShown = null;
+function renderScan() {
+  const home = state.villages[0] || {};
+  if (!$("oasisX")) {
+    $("oasisForm").innerHTML = `<label>Centre <input type="number" id="oasisX" value="${home.x ?? 0}"> | <input type="number" id="oasisY" value="${home.y ?? 0}"></label>
+      <label>Radius <input type="number" id="oasisRadius" min="1" max="200" value="15"></label>
+      <label><input type="checkbox" id="oasisOccupied"> include occupied</label>
+      ${OASIS_TYPES.map(t => `<label><input type="checkbox" class="oasisType" value="${t}" checked> ${t}</label>`).join("")}
+      <button class="btn" id="btnOasisScan">Scan</button>`;
+    $("travcoForm").innerHTML = `<label>Centre <input type="number" id="travcoX" value="${home.x ?? 0}"> | <input type="number" id="travcoY" value="${home.y ?? 0}"></label>
+      <label>Inactive for <input type="number" id="travcoDays" min="1" max="60" value="3"> days</label>
+      <label>Order <select id="travcoOrder"><option value="distance">Distance</option><option value="population">Population</option></select></label>
+      <button class="btn" id="btnTravco">Search</button>`;
+  }
+  const scan = state.scan;
+  if (!scan) return;
+  $("scanTitle").textContent = scan.title; $("scanStatus").textContent = scan.status;
+  const signature = `${scan.title}|${scan.rows.length}|${scan.running}`;
+  if (signature === scanShown || editingIn("scanActions")) return;
+  scanShown = signature;
+  $("scanActions").innerHTML = scan.rows.length ? `<button class="mini" id="scanAll">Select all</button><button class="mini" id="scanNone">None</button>
+    <label>Add to <select id="scanList">${state.farmLists.map(l => `<option>${esc(l.name)}</option>`).join("") || "<option value=''>Read or create a list first</option>"}</select></label>
+    <label>with <select id="scanTroop">${troopOptions("")}</select></label><label>× <input type="number" id="scanCount" min="1" max="10000" value="20"></label>
+    <button class="btn" id="btnScanAdd">Add selected to farm list</button>` : "";
+  $("scanRows").innerHTML = scan.rows.length ? `<table><tr><th></th><th>Coordinates</th><th>Distance</th><th>What</th><th>Details</th></tr>${scan.rows.map(r =>
+    `<tr><td><input type="checkbox" class="scanPick" data-xy="${r.x}|${r.y}" data-oasis="${r.isOasis}"></td><td>${r.x}|${r.y}</td><td>${r.distance ?? ""}</td>
+     <td>${esc(r.kind)}</td><td class="muted">${esc(r.detail)}</td></tr>`).join("")}</table>` : "";
+}
+
+// ----- Transfers and reinforcements --------------------------------------------------------------
+function renderTransfers() {
+  if (editingIn("transferForm") || editingIn("reinforceForm")) return;
+  const sources = (key, cls) => { const picked = new Set(listOpt(key)); return state.villages.map(v =>
+    `<label><input type="checkbox" class="${cls}" value="${esc(v.name)}" ${picked.has(v.name) ? "checked" : ""}> ${esc(v.name)}</label>`).join(" "); };
+  $("transferForm").innerHTML = `<div class="row"><label>Send to <select id="rtTarget"><option value="">(choose)</option>${villageOptions(opt("resource_transfer_target_village_name", ""))}</select></label>
+      <span>from</span> ${sources("resource_transfer_source_village_names", "rtSource")}</div>
+    <div class="row" style="margin-top:8px">
+      <label>when a source is above <input type="number" id="rtThreshold" min="0" max="100" value="${esc(opt("resource_transfer_source_threshold_percent", 50))}"> %</label>
+      <label>keep <input type="number" id="rtKeep" min="0" max="99" value="${esc(opt("resource_transfer_source_keep_percent", 5))}"> % at the source</label>
+      <label>fill target to <input type="number" id="rtFill" min="0" max="100" value="${esc(opt("resource_transfer_target_fill_percent", 90))}"> %</label></div>
+    <div class="row" style="margin-top:8px">${["wood", "clay", "iron", "crop"].map(r =>
+      `<label><input type="checkbox" class="rtRes" value="${r}" ${String(opt(`resource_transfer_send_${r}`, "true")) === "true" ? "checked" : ""}> ${r}</label>`).join("")}
+      <span style="flex:1"></span><button class="btn primary" id="btnTransferSave">Save</button></div>`;
+  const rules = listOpt("reinforcements_troop_rules");
+  $("reinforceForm").innerHTML = `<div class="row"><label>Reinforce <select id="rfTarget"><option value="">(choose)</option>${villageOptions(opt("reinforcements_target_village_name", ""))}</select></label>
+      <span>from</span> ${sources("reinforcements_source_village_names", "rfSource")}</div>
+    <div class="row" style="margin-top:8px"><label>every <input type="number" id="rfMin" min="1" max="10080" value="${esc(opt("reinforcements_send_min_minutes", 60))}"></label>
+      <label>to <input type="number" id="rfMax" min="1" max="10080" value="${esc(opt("reinforcements_send_max_minutes", 120))}"> minutes</label></div>
+    <h3>Troops to send</h3>
+    ${rules.map((r, i) => `<div class="row" style="margin-bottom:4px"><span class="pill">${esc(r.SourceVillageName)}: ${esc(r.TroopType)} — ${
+      r.AmountMode === "fixed" ? r.Amount : r.AmountMode === "all_available" ? "all at home" : r.AmountMode.replace("percent_", "") + "% at home"}
+      <button class="mini" data-rule-remove="${i}">✕</button></span></div>`).join("") || '<div class="muted">No troop rules yet.</div>'}
+    <div class="row" style="margin-top:8px"><select id="rfRuleVillage">${villageOptions("")}</select><select id="rfRuleTroop">${troopOptions("")}</select>
+      <select id="rfRuleMode"><option value="fixed">fixed amount</option><option value="all_available">all at home</option>
+        <option value="percent_20">20% at home</option><option value="percent_50">50% at home</option><option value="percent_90">90% at home</option></select>
+      <input type="number" id="rfRuleAmount" min="1" max="100000" value="10"><button class="btn" id="btnRuleAdd">Add rule</button>
+      <span style="flex:1"></span><button class="btn primary" id="btnReinforceSave">Save</button></div>`;
+}
+
+// ----- Catapult waves ---------------------------------------------------------------------------
+function renderCatapults() {
+  if (editingIn("catapultForm")) return;
+  const setup = state.catapultSetup, troops = setup ? Object.entries(setup.availableTroops).filter(([, n]) => n > 0) : [];
+  const inputs = cls => troops.map(([name, n]) => `<label>${esc(name)} <input type="number" class="${cls}" data-troop-name="${esc(name)}" min="0" max="${n}" value="0"> <span class="muted">/ ${n}</span></label>`).join("")
+    || '<span class="muted">Read troops first.</span>';
+  const keep = Object.fromEntries(["cpVillage", "cpX", "cpY", "cpWaves", "cpT1", "cpT2"].map(id => [id, $(id)?.value]));
+  $("catapultForm").innerHTML = `<div class="row"><label>From <select id="cpVillage">${state.villages.map(v => `<option value="${esc(v.key)}">${esc(v.name)}</option>`).join("")}</select></label>
+      <button class="btn" id="btnCatapultSetup">Read troops at home</button>
+      <span class="muted">${setup ? `Rally Point level ${setup.rallyPointLevel ?? "?"}, read ${new Date(setup.updatedUtc).toLocaleTimeString()}` : ""}</span></div>
+    <div class="row" style="margin-top:8px"><label>Target <input type="number" id="cpX" value="0"> | <input type="number" id="cpY" value="0"></label>
+      <label>Extra waves <input type="number" id="cpWaves" min="0" max="50" value="3"></label><label><input type="checkbox" id="cpRaid"> raid instead of normal attack</label></div>
+    <h3>First attack</h3><div class="row">${inputs("cpFirst")}</div>
+    <h3>Each following wave</h3><div class="row">${inputs("cpWave")}</div>
+    <div class="row" style="margin-top:10px"><label>Catapult target 1 <input type="text" id="cpT1" placeholder="Random"></label>
+      <label>target 2 <input type="text" id="cpT2" placeholder="(none)"></label><span style="flex:1"></span>
+      <button class="btn danger" id="btnCatapultSend">Prepare and send…</button></div>
+    <p class="muted">The attacks are prepared in separate browser tabs first; you confirm once more before they are all sent together.</p>`;
+  for (const [id, value] of Object.entries(keep)) if (value !== undefined && $(id)) $(id).value = value;
+}
+
 document.addEventListener("click", async event => {
-  const d = event.target.dataset;
+  const d = event.target.dataset, id = event.target.id;
+  if (d.post) { showAlert(""); await api("POST", d.post); return refresh(); }
+  if (d.statMove) {
+    const order = $("heroStats").dataset.order.split(","), i = order.indexOf(d.statMove), j = i + Number(d.dir);
+    if (j >= 0 && j < order.length) { [order[i], order[j]] = [order[j], order[i]]; await saveHeroStats(order); }
+    return;
+  }
+  if (id === "scanAll" || id === "scanNone") { document.querySelectorAll(".scanPick").forEach(c => c.checked = id === "scanAll"); return; }
+  if (id === "btnOasisScan") {
+    await api("POST", "/api/scan/oases", { x: Number($("oasisX").value), y: Number($("oasisY").value), radius: Number($("oasisRadius").value),
+      includeOccupied: $("oasisOccupied").checked, types: [...document.querySelectorAll(".oasisType:checked")].map(c => c.value) });
+    return refresh();
+  }
+  if (id === "btnTravco") {
+    await api("POST", "/api/scan/travco", { x: Number($("travcoX").value), y: Number($("travcoY").value), daysInactive: Number($("travcoDays").value), orderBy: $("travcoOrder").value });
+    return refresh();
+  }
+  if (id === "btnScanAdd") {
+    const picked = [...document.querySelectorAll(".scanPick:checked")];
+    if (!picked.length) return showAlert("Tick at least one result.");
+    if (!$("scanList").value) return showAlert("Read or create a farm list first.");
+    await api("POST", "/api/farmlists/targets", { listName: $("scanList").value, troopType: $("scanTroop").value, troopCount: Number($("scanCount").value),
+      coordinates: picked.map(c => c.dataset.xy).join(" "), oases: picked.every(c => c.dataset.oasis === "true") });
+    return refresh();
+  }
+  if (id === "btnTransferSave") {
+    const values = { resource_transfer_target_village_name: $("rtTarget").value,
+      resource_transfer_source_village_names: JSON.stringify([...document.querySelectorAll(".rtSource:checked")].map(c => c.value)),
+      resource_transfer_source_threshold_percent: $("rtThreshold").value, resource_transfer_source_keep_percent: $("rtKeep").value,
+      resource_transfer_target_fill_percent: $("rtFill").value };
+    document.querySelectorAll(".rtRes").forEach(c => values[`resource_transfer_send_${c.value}`] = String(c.checked));
+    await setOptions(values); document.activeElement?.blur(); return refresh();
+  }
+  if (id === "btnRuleAdd" || d.ruleRemove !== undefined || id === "btnReinforceSave") {
+    let rules = listOpt("reinforcements_troop_rules");
+    if (id === "btnRuleAdd") rules.push({ AccountName: state.activeAccount, SourceVillageName: $("rfRuleVillage").value, TroopType: $("rfRuleTroop").value,
+      AmountMode: $("rfRuleMode").value, Amount: Number($("rfRuleAmount").value) || 1, IsEnabled: true });
+    if (d.ruleRemove !== undefined) rules = rules.filter((_, i) => i !== Number(d.ruleRemove));
+    await setOptions({ reinforcements_troop_rules: JSON.stringify(rules), reinforcements_target_village_name: $("rfTarget").value,
+      reinforcements_source_village_names: JSON.stringify([...document.querySelectorAll(".rfSource:checked")].map(c => c.value)),
+      reinforcements_send_min_minutes: $("rfMin").value, reinforcements_send_max_minutes: $("rfMax").value });
+    document.activeElement?.blur(); return refresh();
+  }
+  if (id === "btnCatapultSetup") { await api("POST", "/api/catapults/setup", { villageKey: $("cpVillage").value }); return refresh(); }
+  if (id === "btnCatapultSend") {
+    const read = cls => Object.fromEntries([...document.querySelectorAll(`.${cls}`)].map(i => [i.dataset.troopName, Number(i.value) || 0]).filter(([, n]) => n > 0));
+    const first = read("cpFirst"), wave = read("cpWave");
+    if (!Object.keys(first).length) return showAlert("Enter troops for the first attack.");
+    await api("POST", "/api/catapults/send", { villageKey: $("cpVillage").value, x: Number($("cpX").value), y: Number($("cpY").value), waveCount: Number($("cpWaves").value),
+      raid: $("cpRaid").checked, firstAttackTroops: first, waveTroops: wave, target1: $("cpT1").value, target2: $("cpT2").value });
+    return refresh();
+  }
   if (d.pick) { selectedVillage = d.pick; document.activeElement?.blur(); renderBuild(); renderTroops(); }
   else if (d.run) { await api("POST", "/api/jobs/run", { key: d.run }); refresh(); }
   else if (d.prompt !== undefined) { await api("POST", "/api/prompt", { id: state.prompt.id, value: d.prompt }); $("promptDialog").close(); refresh(); }
@@ -510,9 +753,12 @@ async function addBuildItem(type) {
   } else if (type === "resource_field") {
     const field = picked("fieldSlot"); if (!field.value) return showAlert("Scan the village first.");
     item = { ...item, slotId: Number(field.value), name: field.name, targetLevel: Number($("fieldLevel").value) };
-  } else if (type === "building_upgrade") {
+  } else if (type === "building_upgrade" || type === "building_max") {
     const building = picked("buildingSlot"); if (!building.value) return showAlert("Scan the village first.");
-    item = { ...item, slotId: Number(building.value), name: building.name, targetLevel: Number($("buildingLevel").value) };
+    item = { ...item, slotId: Number(building.value), name: building.name, targetLevel: type === "building_max" ? 20 : Number($("buildingLevel").value) };
+  } else if (type === "building_demolish") {
+    const building = picked("demolishSlot"); if (!building.value) return showAlert("Scan the village first.");
+    item = { ...item, slotId: Number(building.value), name: building.name, targetLevel: Number($("demolishLevel").value) };
   } else {
     const building = picked("constructGid"), slot = $("constructSlot").value;
     if (!slot || !building.value) return showAlert("Scan the village first so empty slots are known.");

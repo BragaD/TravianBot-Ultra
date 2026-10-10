@@ -23,15 +23,21 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
 2. **Log in** — a Chrome window opens and logs in. Your villages appear on the Dashboard.
 3. Pick what to automate on the **Dashboard**, then configure it:
    - **Building** — per-village build queue: all resource fields to a level, a single field, upgrade
-     a building, or construct a new one. Items run top to bottom.
-   - **Hero** — adventures (minimum HP, shortest/first), auto-revive, attribute points, and using the
-     hero's inventory resources when a build is short on resources.
+     a building to a level or to its maximum, construct a new one, or demolish one. Items run top to bottom.
+   - **Hero** — adventures (minimum HP, shortest/first), auto-revive, the order and maximum for
+     attribute points, adventure bonus videos, and using the hero's inventory resources when a
+     build is short on resources.
    - **Farming** — create farm lists, add targets by coordinates, and send lists on a timer (all
-     lists, or only the ones you tick). Reading, creating and editing lists works on any account;
-     the game itself only lets Gold Club accounts press a list's Start button, so without Gold Club
+     lists, or only the ones you tick). Targets with losses can be switched off or moved to another
+     list. The oasis scan and the Travco inactive-village search find targets you can add to a list.
+     The game itself only lets Gold Club accounts press a list's Start button, so without Gold Club
      the bot sends each active target of the selected lists as an ordinary raid from the Rally Point.
    - **Troops** — per-village training rules for Barracks, Stable and Workshop, Smithy upgrade
-     targets, and Town Hall celebrations.
+     targets, and Town Hall and Brewery celebrations.
+   - **Transfers** — send resources and reinforcements between your own villages on a schedule.
+   - **Catapults** — prepare a first attack plus following waves and send them together.
+   - **Settings** — NPC trade and gold limits, bonus videos (25% faster build, +15% production),
+     and marking messages and reports as read.
 4. **Start bot**. The Dashboard shows what runs next; the **Log** tab shows everything the bot does.
 
 The game language must be English (Settings → *Set game language to English*).
@@ -45,6 +51,6 @@ Set `TBOT_ROOT` to use a different folder (for example one per account when runn
 
 ## Not in the macOS build
 
-The Windows app has more tools than this front-end exposes yet: NPC trade, resource transfers and
-reinforcements between villages, catapult waves, oasis/Travco farm search, building templates,
-bonus videos, session pacing/auto-sleep, proxy management and report screenshots.
+The Windows app has more tools than this front-end exposes yet: building templates, session
+pacing/auto-sleep, proxy library and failover, incoming-attack alerts, report screenshots, and the
+Windows app's automatic build planning (storage preflight, requirement repair, time estimates).

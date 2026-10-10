@@ -250,6 +250,12 @@ public sealed partial class BotTaskRunner
                 goldClubActive = await client.ReadGoldClubStatusAsync(cancellationToken);
                 if (!goldClubActive)
                 {
+                    foreach (var request in CreateFarmListLossHandlingRequests(options))
+                    {
+                        var losses = await new ManualFarmingOperation(client).HandleLossTargetsAsync(request, cancellationToken);
+                        log($"Farm list {request.LossColors.ToString().ToLowerInvariant()} loss handling: found={losses.RowsFound}, deactivated={losses.RowsDeactivated}, moved={losses.RowsMoved}.");
+                    }
+
                     result = await client.SendFarmListTargetsAsRaidsAsync(
                         options.ContinuousFarmListNames,
                         options.ContinuousFarmListIds,

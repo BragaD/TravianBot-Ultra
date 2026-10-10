@@ -87,10 +87,13 @@ app.MapGet("/api/state", () =>
         prompt = engine.Prompt,
         tribe = engine.Tribe,
         hero = engine.Hero,
+        scan = engine.Scan,
+        catapultSetup = engine.CatapultSetup,
         farmLists = engine.FarmLists,
         villages = engine.Villages(active),
         jobs = engine.Jobs(),
         settings = active.Length == 0 ? new MacSettings() : settings.Load(active),
+        defaults = MacDefaults.Options,
     });
 });
 
@@ -153,7 +156,8 @@ app.MapPost("/api/farmlists/targets", (FarmTargetsAdd request) =>
 {
     // Accepts "12|-34", "(12|-34)" or "12,-34", separated by spaces, semicolons or new lines.
     var coordinates = System.Text.RegularExpressions.Regex.Matches(request.Coordinates ?? string.Empty, @"(-?\d+)\s*[|,/]\s*(-?\d+)")
-        .Select(match => new TbotUltra.Worker.Domain.FarmCoordinate(int.Parse(match.Groups[1].Value), int.Parse(match.Groups[2].Value)))
+        .Select(match => new TbotUltra.Worker.Domain.FarmCoordinate(
+            int.Parse(match.Groups[1].Value), int.Parse(match.Groups[2].Value), RequireUnoccupiedOasis: request.Oases, IsOasis: request.Oases))
         .ToList();
     if (coordinates.Count == 0)
     {
@@ -162,6 +166,15 @@ app.MapPost("/api/farmlists/targets", (FarmTargetsAdd request) =>
 
     return Fire(() => engine.AddFarmTargetsAsync(request.ListName, request.TroopType, request.TroopCount, coordinates));
 });
+app.MapPost("/api/inbox/read", () => Fire(engine.MarkInboxReadAsync));
+app.MapPost("/api/hero/bonus/{kind}", (string kind) => Fire(() => engine.RunAdventureBonusAsync(kind)));
+app.MapPost("/api/production-bonus", () => Fire(engine.RunProductionBonusAsync));
+app.MapPost("/api/scan/oases", (OasisScanRequest request) =>
+    Fire(() => engine.ScanOasesAsync(request.X, request.Y, request.Radius, request.IncludeOccupied, request.Types ?? [])));
+app.MapPost("/api/scan/travco", (TravcoRequest request) =>
+    Fire(() => engine.SearchTravcoAsync(request.X, request.Y, Math.Max(1, request.DaysInactive), request.OrderBy ?? "distance")));
+app.MapPost("/api/catapults/setup", (VillageRequest request) => Fire(() => engine.ReadCatapultSetupAsync(request.VillageKey)));
+app.MapPost("/api/catapults/send", (CatapultPlan plan) => Fire(() => engine.StartCatapultWavesAsync(plan)));
 app.MapPost("/api/hero/refresh", () => Fire(engine.RefreshHeroAsync));
 app.MapPost("/api/language/english", () => Fire(engine.SetLanguageToEnglishAsync));
 app.MapPost("/api/diagnostics/page", (PageRequest request) => Fire(() => engine.SavePageHtmlAsync(request.Path)));
@@ -233,6 +246,7 @@ app.MapPut("/api/villages/{key}", (string key, VillagePatch patch) =>
         var village = RequireVillage(current, key);
         village.Enabled = patch.Enabled ?? village.Enabled;
         village.TownHall = patch.TownHall ?? village.TownHall;
+        village.Brewery = patch.Brewery ?? village.Brewery;
         village.SmithyTargets = patch.SmithyTargets ?? village.SmithyTargets;
         if (patch.Troops is not null)
         {
@@ -244,7 +258,7 @@ app.MapPut("/api/villages/{key}", (string key, VillagePatch patch) =>
 
 app.MapPost("/api/villages/{key}/build", (string key, BuildItem item) =>
 {
-    if (item.Type is not ("resources_all" or "resource_field" or "building_upgrade" or "building_construct"))
+    if (item.Type is not ("resources_all" or "resource_field" or "building_upgrade" or "building_max" or "building_construct" or "building_demolish"))
     {
         throw new InvalidOperationException($"Unknown build item type '{item.Type}'.");
     }
@@ -253,7 +267,7 @@ app.MapPost("/api/villages/{key}/build", (string key, BuildItem item) =>
     item.Status = "pending";
     item.Note = string.Empty;
     item.StallCount = 0;
-    item.TargetLevel = Math.Clamp(item.TargetLevel, 1, 100);
+    item.TargetLevel = Math.Clamp(item.TargetLevel, 0, 100);
     settings.Update(RequireAccount(), current => RequireVillage(current, key).BuildQueue.Add(item));
     return Results.Json(new { item.Id });
 });
@@ -388,8 +402,14 @@ internal sealed record PageRequest(string Path);
 
 internal sealed record FarmListCreate(string Name, string VillageKey, string TroopType, int TroopCount);
 
-internal sealed record FarmTargetsAdd(string ListName, string TroopType, int TroopCount, string? Coordinates);
+internal sealed record FarmTargetsAdd(string ListName, string TroopType, int TroopCount, string? Coordinates, bool Oases = false);
 
 internal sealed record FarmListSelection(List<string>? Names, List<string>? Ids);
 
-internal sealed record VillagePatch(bool? Enabled, bool? TownHall, string? SmithyTargets, Dictionary<string, string>? Troops);
+internal sealed record VillagePatch(bool? Enabled, bool? TownHall, bool? Brewery, string? SmithyTargets, Dictionary<string, string>? Troops);
+
+internal sealed record VillageRequest(string VillageKey);
+
+internal sealed record OasisScanRequest(int X, int Y, int Radius, bool IncludeOccupied, List<string>? Types);
+
+internal sealed record TravcoRequest(int X, int Y, int DaysInactive, string? OrderBy);

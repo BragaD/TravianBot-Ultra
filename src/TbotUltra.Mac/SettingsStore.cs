@@ -14,13 +14,18 @@ public sealed class FeatureToggles
     public bool CollectDailyQuests { get; set; } = true;
     public bool TownHall { get; set; }
     public bool Smithy { get; set; }
+    public bool Brewery { get; set; }
+    public bool ResourceTransfer { get; set; }
+    public bool Reinforcements { get; set; }
+    public bool ProductionBonus { get; set; }
+    public bool MarkRead { get; set; }
 }
 
 public sealed class BuildItem
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..10];
 
-    /// <summary>resources_all | resource_field | building_upgrade | building_construct</summary>
+    /// <summary>resources_all | resource_field | building_upgrade | building_max | building_construct | building_demolish</summary>
     public string Type { get; set; } = string.Empty;
     public int? SlotId { get; set; }
     public int? Gid { get; set; }
@@ -44,6 +49,7 @@ public sealed class VillageSettings
     public Dictionary<string, string> Troops { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string SmithyTargets { get; set; } = string.Empty;
     public bool TownHall { get; set; }
+    public bool Brewery { get; set; }
 }
 
 public sealed class MacSettings

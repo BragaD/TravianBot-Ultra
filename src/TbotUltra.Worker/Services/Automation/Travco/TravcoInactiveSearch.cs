@@ -379,14 +379,17 @@ public static class TravcoInactiveSearch
         }
 
         var pageNumber = payload.TryGetProperty("pageNumber", out var pageElement)
+            && pageElement.ValueKind == JsonValueKind.Number
             && pageElement.TryGetInt32(out var parsedPage)
                 ? parsedPage
                 : 1;
         var totalPages = payload.TryGetProperty("totalPages", out var totalElement)
+            && totalElement.ValueKind == JsonValueKind.Number
             && totalElement.TryGetInt32(out var parsedTotal)
                 ? parsedTotal
                 : 1;
         int? totalInactiveCount = payload.TryGetProperty("totalInactiveCount", out var countElement)
+            && countElement.ValueKind == JsonValueKind.Number
             && countElement.TryGetInt32(out var parsedCount)
                 ? parsedCount
                 : null;
