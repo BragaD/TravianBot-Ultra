@@ -337,6 +337,27 @@ public sealed partial class BrowserSession : IAsyncDisposable
         // overlay is hidden before first paint. Bonus videos use a separate browser context.
         await _context.AddInitScriptAsync(MainContextConsentUiSuppressionScript);
 
+        // Travian's contextual help bubble can sit on top of form buttons (seen over the Rally Point
+        // Send button) and swallow trusted clicks until they time out. Let pointer events pass through
+        // it; the bubble stays visible, it just no longer blocks the control underneath.
+        await _context.AddInitScriptAsync(
+            """
+            (() => {
+              const apply = () => {
+                if (document.getElementById('tbot-help-passthrough')) return;
+                const style = document.createElement('style');
+                style.id = 'tbot-help-passthrough';
+                style.textContent = '#contextualHelp, #contextualHelp * { pointer-events: none !important; }';
+                (document.head || document.documentElement).appendChild(style);
+              };
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', apply, { once: true });
+              } else {
+                apply();
+              }
+            })();
+            """);
+
         // Some Travian pages spawn short-lived tabs via window.open or target=_blank links. Neutralise
         // those in every document so they are never created. The bot navigates with GotoAsync and
         // creates its own pages via NewPageAsync, so it does not rely on page script popups.

@@ -37,7 +37,8 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
    - **Transfers** — send resources and reinforcements between your own villages on a schedule.
    - **Catapults** — prepare a first attack plus following waves and send them together.
    - **Settings** — NPC trade and gold limits, bonus videos (25% faster build, +15% production),
-     and marking messages and reports as read.
+     and marking messages and reports as read. NPC trade runs for upgrades and resource fields; the
+     engine does not trade when constructing a brand-new building.
 4. **Start bot**. The Dashboard shows what runs next; the **Log** tab shows everything the bot does.
 
 The game language must be English (Settings → *Set game language to English*).

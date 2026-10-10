@@ -345,7 +345,7 @@ public sealed partial class TravianClient : ICombatClient
     {
         var newPageTask = sourcePage.Context.WaitForPageAsync();
         await DelayBeforeCatapultPreparationActionAsync(cancellationToken);
-        if (!await TryClickCatapultSendButtonAsync(sourcePage, 0, [KeyboardModifier.Control], cancellationToken))
+        if (!await TryClickCatapultSendButtonAsync(sourcePage, 0, [KeyboardModifier.ControlOrMeta], cancellationToken))
         {
             throw new InvalidOperationException("Could not open a catapult wave tab from Send Troops.");
         }
