@@ -57,5 +57,14 @@ public static class MacDefaults
         ["resource_transfer_target_fill_percent"] = "90",
         ["reinforcements_send_min_minutes"] = "60",
         ["reinforcements_send_max_minutes"] = "120",
+
+        // Session pacing is the Mac loop's own: play for a while, close the browser, come back later.
+        ["mac_pacing_enabled"] = "true",
+        ["mac_pacing_run_min_minutes"] = "60",
+        ["mac_pacing_run_max_minutes"] = "150",
+        ["mac_pacing_sleep_min_minutes"] = "15",
+        ["mac_pacing_sleep_max_minutes"] = "45",
+        ["mac_active_from_hour"] = "0",
+        ["mac_active_to_hour"] = "24",
     };
 }

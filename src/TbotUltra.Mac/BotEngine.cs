@@ -88,6 +88,8 @@ public sealed class BotEngine
     private CancellationTokenSource? _loopCancellation;
     private Task? _loopTask;
     private CancellationTokenSource? _manualCancellation;
+    private DateTimeOffset? _sleepUntilUtc;
+    private volatile bool _wakeRequested;
     private ScanView? _scan;
     private CatapultSetupView? _catapultSetup;
     private PromptView? _prompt;
@@ -121,6 +123,20 @@ public sealed class BotEngine
     public string Activity { get; private set; } = "Not logged in";
 
     public string Alert { get; private set; } = string.Empty;
+
+    /// <summary>Set while the loop has closed the browser for a pacing break.</summary>
+    public DateTimeOffset? SleepingUntilUtc => _sleepUntilUtc;
+
+    public void WakeNow() => _wakeRequested = true;
+
+    public void ReleaseFarmTarget(string key)
+    {
+        var account = _accounts.ActiveAccountName();
+        if (account.Length > 0)
+        {
+            _settings.Update(account, settings => settings.FarmRaids.OnHold.Remove(key));
+        }
+    }
 
     public string Tribe => _tribe;
 
@@ -188,7 +204,9 @@ public sealed class BotEngine
 
     // ----- Session ------------------------------------------------------------------------------
 
-    public Task LoginAsync() => RunManualAsync("Logging in", async cancellationToken =>
+    public Task LoginAsync() => RunManualAsync("Logging in", LoginCoreAsync);
+
+    private async Task LoginCoreAsync(CancellationToken cancellationToken)
     {
         var account = RequireActiveAccount();
         var options = BuildOptions(account, _settings.Load(account.Name));
@@ -233,7 +251,30 @@ public sealed class BotEngine
         }
 
         Log($"[mac] logged in as '{account.Name}' — tribe {_tribe}, {_villages.Count} village(s).");
-    });
+    }
+
+    /// <summary>Runs the startup choices: log in when the app opens, then start the bot.</summary>
+    public async Task RunStartupAsync()
+    {
+        var account = _accounts.ActiveAccountName();
+        if (account.Length == 0)
+        {
+            return;
+        }
+
+        var startup = _settings.Load(account).Startup;
+        if (!startup.AutoLogin)
+        {
+            return;
+        }
+
+        Log("[mac] logging in automatically (startup setting).");
+        await LoginAsync();
+        if (LoggedIn && startup.AutoStart)
+        {
+            Start();
+        }
+    }
 
     public Task ScanVillagesAsync() => RunManualAsync("Scanning villages", async cancellationToken =>
     {
@@ -579,10 +620,18 @@ public sealed class BotEngine
     {
         try
         {
+            var sessionEndsAt = NextSessionEnd(_settings.Load(RequireActiveAccount().Name));
             while (!cancellationToken.IsCancellationRequested)
             {
                 var account = RequireActiveAccount();
                 var settings = _settings.Load(account.Name);
+                if (ResolveWakeTime(settings, sessionEndsAt) is { } wakeAt)
+                {
+                    await SleepUntilAsync(wakeAt, cancellationToken);
+                    sessionEndsAt = NextSessionEnd(_settings.Load(account.Name));
+                    continue;
+                }
+
                 var jobs = BuildJobs(settings, account.Name);
                 var now = DateTimeOffset.UtcNow;
                 Job? next;
@@ -633,10 +682,103 @@ public sealed class BotEngine
         }
         finally
         {
-            if (LoggedIn)
+            Activity = LoggedIn ? "Logged in — automation stopped" : "Not logged in";
+        }
+    }
+
+    // ----- Session pacing --------------------------------------------------------------------------
+
+    private static string PacingValue(MacSettings settings, string key)
+        => settings.Options.GetValueOrDefault(key) ?? MacDefaults.Options[key];
+
+    private static int PacingMinutes(MacSettings settings, string key)
+        => int.TryParse(PacingValue(settings, key), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? Math.Max(1, value) : 1;
+
+    private static TimeSpan RandomMinutes(MacSettings settings, string minKey, string maxKey)
+    {
+        var min = PacingMinutes(settings, minKey);
+        var max = Math.Max(min, PacingMinutes(settings, maxKey));
+        return TimeSpan.FromSeconds(Random.Shared.Next(min * 60, (max * 60) + 1));
+    }
+
+    private static int ParseHour(string value)
+        => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var hour) ? Math.Clamp(hour, 0, 24) : 0;
+
+    private static DateTimeOffset NextSessionEnd(MacSettings settings)
+        => DateTimeOffset.UtcNow + RandomMinutes(settings, "mac_pacing_run_min_minutes", "mac_pacing_run_max_minutes");
+
+    /// <summary>Returns when to come back if the loop should take a break now, or null to keep playing.</summary>
+    internal static DateTimeOffset? ResolveWakeTime(MacSettings settings, DateTimeOffset sessionEndsAt, DateTimeOffset? nowOverride = null)
+    {
+        if (!string.Equals(PacingValue(settings, "mac_pacing_enabled"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var now = nowOverride ?? DateTimeOffset.Now;
+        var from = ParseHour(PacingValue(settings, "mac_active_from_hour"));
+        var to = ParseHour(PacingValue(settings, "mac_active_to_hour"));
+        var limited = from != to && !(from == 0 && to == 24);
+        if (limited)
+        {
+            var hour = now.Hour;
+            var active = from < to ? hour >= from && hour < to : hour >= from || hour < to;
+            if (!active)
             {
-                Activity = "Logged in — automation stopped";
+                // Outside the allowed hours: come back at the next start hour, plus a few random minutes.
+                var start = new DateTimeOffset(now.Year, now.Month, now.Day, from % 24, 0, 0, now.Offset);
+                if (start <= now)
+                {
+                    start = start.AddDays(1);
+                }
+
+                return start.AddSeconds(Random.Shared.Next(0, 600));
             }
+        }
+
+        return now.ToUniversalTime() >= sessionEndsAt
+            ? now + RandomMinutes(settings, "mac_pacing_sleep_min_minutes", "mac_pacing_sleep_max_minutes")
+            : null;
+    }
+
+    // A pacing break: close the browser (the saved session makes the next login quick), wait, log back in.
+    private async Task SleepUntilAsync(DateTimeOffset wakeAt, CancellationToken cancellationToken)
+    {
+        Log($"[mac] taking a break until {wakeAt.ToLocalTime():HH:mm}; closing the browser.");
+        await _manualGate.WaitAsync(cancellationToken);
+        try
+        {
+            await _runner.ShutdownAsync(Log);
+            LoggedIn = false;
+            _sleepUntilUtc = wakeAt.ToUniversalTime();
+            _wakeRequested = false;
+            Activity = $"Sleeping until {wakeAt.ToLocalTime():HH:mm} — browser closed";
+            while (DateTimeOffset.UtcNow < _sleepUntilUtc && !_wakeRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            }
+
+            _sleepUntilUtc = null;
+            Log("[mac] break over; logging back in.");
+            for (var attempt = 1; !LoggedIn; attempt++)
+            {
+                Activity = "Waking up — logging in";
+                try
+                {
+                    await LoginCoreAsync(cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && attempt < 4)
+                {
+                    Log($"[mac] login after the break failed ({attempt}/3): {ex.Message} — retrying in 5 minutes.");
+                    Activity = "Waking up — login failed, retrying in 5 minutes";
+                    await Task.Delay(TimeSpan.FromMinutes(5), cancellationToken);
+                }
+            }
+        }
+        finally
+        {
+            _sleepUntilUtc = null;
+            _manualGate.Release();
         }
     }
 
@@ -656,16 +798,42 @@ public sealed class BotEngine
             {
                 // The game only lets Gold Club accounts start a farm list. Without it the engine sends the
                 // lists' targets as individual raids instead, and this round is done.
+                var raidState = settings.FarmRaids;
+                var guard = new FarmRaidGuard(raidState.BusyUntilUtc, raidState.OnHold.Keys.ToList(), raidState.LastReportId);
                 var (goldClubActive, raids) = await _runner.SendFarmListTargetsAsRaidsUnlessGoldClubAsync(
-                    options, Log, cancellationToken: cancellationToken);
+                    options, guard, Log, cancellationToken: cancellationToken);
                 if (!goldClubActive && raids is not null)
                 {
+                    _settings.Update(account.Name, current =>
+                    {
+                        var state = current.FarmRaids;
+                        state.LastReportId = Math.Max(state.LastReportId, raids.LastReportId);
+                        foreach (var expired in state.BusyUntilUtc.Where(pair => pair.Value <= DateTimeOffset.UtcNow).Select(pair => pair.Key).ToList())
+                        {
+                            state.BusyUntilUtc.Remove(expired);
+                        }
+
+                        foreach (var raid in raids.SentRaids ?? [])
+                        {
+                            state.BusyUntilUtc[$"{raid.X}|{raid.Y}"] = raid.ReturnAtUtc;
+                        }
+
+                        foreach (var loss in raids.NewLosses ?? [])
+                        {
+                            state.OnHold[$"{loss.X}|{loss.Y}"] = new HeldTarget
+                            {
+                                Reason = loss.AllLost ? "Last raid lost all troops" : "Last raid had losses",
+                                SinceUtc = DateTimeOffset.UtcNow,
+                            };
+                        }
+                    });
+
                     var delay = TimeSpan.FromSeconds(FarmingDefaults.CalculateDispatchDelaySeconds(
                         options.ContinuousFarmDispatchDelayMinMinutes, options.ContinuousFarmDispatchDelayMaxMinutes));
                     Schedule(
                         job.Key,
                         delay,
-                        $"Raids sent: {raids.Sent}. Already running: {raids.AlreadyRunning}. Waiting for troops: {raids.WaitingForTroops}. Failed: {raids.Failed}.");
+                        $"Raids sent: {raids.Sent}. Still out: {raids.AlreadyRunning}. On hold: {raids.SkippedOnHold}. Waiting for troops: {raids.WaitingForTroops}. Failed: {raids.Failed}.");
                     return;
                 }
             }
@@ -1315,7 +1483,9 @@ public sealed class BotEngine
     {
         if (!await _manualGate.WaitAsync(0))
         {
-            throw new InvalidOperationException($"Busy: {Busy}. Wait for it to finish.");
+            throw new InvalidOperationException(_sleepUntilUtc is null
+                ? $"Busy: {Busy}. Wait for it to finish."
+                : "The bot is taking a break and the browser is closed. Press “Wake now” first.");
         }
 
         using var cancellation = new CancellationTokenSource();

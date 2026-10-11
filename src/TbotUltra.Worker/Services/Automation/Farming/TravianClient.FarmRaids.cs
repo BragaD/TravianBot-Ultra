@@ -16,10 +16,23 @@ public sealed partial class TravianClient
     public async Task<FarmRaidBatchResult> SendFarmListTargetsAsRaidsAsync(
         IReadOnlyCollection<string> selectedNames,
         IReadOnlyCollection<string> selectedIds,
+        FarmRaidGuard guard,
+        bool holdOnSomeLosses,
+        bool holdOnAllLost,
         CancellationToken cancellationToken = default)
     {
         LogFunctionStarted();
         await EnsureLoggedInAsync(cancellationToken: cancellationToken);
+
+        // Loss reports first: a target that just cost troops must not be raided again this round.
+        var (newLosses, lastReportId) = await ReadNewFarmRaidLossesAsync(guard.LastReportId, holdOnSomeLosses, holdOnAllLost, cancellationToken);
+        var blocked = new HashSet<string>(guard.Blocked, StringComparer.Ordinal);
+        foreach (var loss in newLosses)
+        {
+            blocked.Add(FarmRaidKey(loss.X, loss.Y));
+            Notify($"[farm-raid] target ({loss.X}|{loss.Y}) put on hold: its last raid {(loss.AllLost ? "lost all troops" : "had losses")} (report {loss.ReportId}).");
+        }
+
         await EnsureRallyPointAndOpenFarmListPageAsync(cancellationToken, refreshCurrentPage: true);
         await DismissDeactivatedTargetsNoticeAsync(cancellationToken);
 
@@ -29,21 +42,43 @@ public sealed partial class TravianClient
         var sent = 0;
         var failed = 0;
         var skippedNoTroops = 0;
+        var skippedOnHold = 0;
+        var stillRunning = targets.RunningCount;
+        var sentRaids = new List<FarmRaidSent>();
+        var raidedThisRound = new HashSet<string>(StringComparer.Ordinal);
         var villagesOutOfTroops = new HashSet<int>();
+        var now = DateTimeOffset.UtcNow;
         foreach (var target in targets.Targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var key = FarmRaidKey(target.X, target.Y);
+            if (blocked.Contains(key))
+            {
+                skippedOnHold++;
+                continue;
+            }
+
+            // The same target can sit in several lists; one raid per round is enough.
+            if (raidedThisRound.Contains(key)
+                || (guard.BusyUntilUtc.TryGetValue(key, out var busyUntil) && busyUntil > now))
+            {
+                stillRunning++;
+                continue;
+            }
+
             if (villagesOutOfTroops.Contains(target.VillageId))
             {
                 skippedNoTroops++;
                 continue;
             }
 
-            var outcome = await TrySendFarmRaidAsync(target, cancellationToken);
+            var (outcome, returnAtUtc) = await TrySendFarmRaidAsync(target, cancellationToken);
             switch (outcome)
             {
                 case FarmRaidOutcome.Sent:
                     sent++;
+                    raidedThisRound.Add(key);
+                    sentRaids.Add(new FarmRaidSent(target.X, target.Y, returnAtUtc));
                     break;
                 case FarmRaidOutcome.NotEnoughTroops:
                     // Targets are ordered by the list; once the village runs dry the rest wait for the next round.
@@ -56,8 +91,82 @@ public sealed partial class TravianClient
             }
         }
 
-        Notify($"[farm-raid] done: sent={sent}, waitingForTroops={skippedNoTroops}, failed={failed}, alreadyRunning={targets.RunningCount}.");
-        return new FarmRaidBatchResult(targets.ListCount, sent, targets.RunningCount, skippedNoTroops, failed);
+        Notify($"[farm-raid] done: sent={sent}, stillOut={stillRunning}, onHold={skippedOnHold}, waitingForTroops={skippedNoTroops}, failed={failed}.");
+        return new FarmRaidBatchResult(
+            targets.ListCount, sent, stillRunning, skippedNoTroops, failed, skippedOnHold, sentRaids, newLosses, lastReportId);
+    }
+
+    internal static string FarmRaidKey(int x, int y)
+        => $"{x.ToString(CultureInfo.InvariantCulture)}|{y.ToString(CultureInfo.InvariantCulture)}";
+
+    // Reads the first page of offensive reports and returns raids newer than the last one seen that
+    // came back with losses. iReport2 = won with losses, iReport3 = all troops lost.
+    private async Task<(IReadOnlyList<FarmRaidLoss> Losses, long LastReportId)> ReadNewFarmRaidLossesAsync(
+        long lastReportId,
+        bool holdOnSomeLosses,
+        bool holdOnAllLost,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await GotoAsync($"{Paths.Reports}/offensive", cancellationToken);
+            var json = await _page.EvaluateAsync<string>(
+                """
+                () => JSON.stringify(Array.from(document.querySelectorAll('#overview tbody tr')).map(row => {
+                  const id = Number(row.querySelector('input.check.report')?.value || 0);
+                  const icon = (row.querySelector('img.iReport')?.className || '').match(/iReport(\d+)/);
+                  const strip = (text) => (text || '').replace(/[^0-9-]/g, '');
+                  const x = strip(row.querySelector('.coordinateX')?.textContent);
+                  const y = strip(row.querySelector('.coordinateY')?.textContent);
+                  return { id, level: icon ? Number(icon[1]) : 0, x: x === '' ? null : Number(x), y: y === '' ? null : Number(y) };
+                }))
+                """).WaitAsync(cancellationToken);
+
+            var losses = new List<FarmRaidLoss>();
+            var judged = new HashSet<string>(StringComparer.Ordinal);
+            var newest = lastReportId;
+            using var document = JsonDocument.Parse(json);
+            foreach (var row in document.RootElement.EnumerateArray())
+            {
+                var id = row.GetProperty("id").GetInt64();
+                if (id <= 0)
+                {
+                    continue;
+                }
+
+                newest = Math.Max(newest, id);
+                var level = row.GetProperty("level").GetInt32();
+
+                // The first read only sets the watermark, so old reports never put a target on hold.
+                if (lastReportId <= 0 || id <= lastReportId
+                    || row.GetProperty("x").ValueKind != JsonValueKind.Number
+                    || row.GetProperty("y").ValueKind != JsonValueKind.Number)
+                {
+                    continue;
+                }
+
+                // Rows are newest first: only a target's most recent raid decides, so a clean raid
+                // after an unlucky one keeps the target in rotation.
+                var x = row.GetProperty("x").GetInt32();
+                var y = row.GetProperty("y").GetInt32();
+                if (!judged.Add(FarmRaidKey(x, y)))
+                {
+                    continue;
+                }
+
+                if ((level == 2 && holdOnSomeLosses) || (level == 3 && holdOnAllLost))
+                {
+                    losses.Add(new FarmRaidLoss(x, y, level == 3, id));
+                }
+            }
+
+            return (losses, newest);
+        }
+        catch (Exception ex) when (ex is PlaywrightException or JsonException or TimeoutException)
+        {
+            Notify($"[farm-raid] could not read raid reports for losses: {ex.Message}");
+            return ([], lastReportId);
+        }
     }
 
     private enum FarmRaidOutcome
@@ -171,8 +280,10 @@ public sealed partial class TravianClient
         return (targets, listCount, running);
     }
 
-    private async Task<FarmRaidOutcome> TrySendFarmRaidAsync(FarmRaidTarget target, CancellationToken cancellationToken)
+    private async Task<(FarmRaidOutcome Outcome, DateTimeOffset ReturnAtUtc)> TrySendFarmRaidAsync(FarmRaidTarget target, CancellationToken cancellationToken)
     {
+        // Used when the confirmation page does not expose the travel time.
+        var returnAtUtc = DateTimeOffset.UtcNow.AddMinutes(30);
         var label = $"({target.X}|{target.Y}) from list '{target.ListName}'";
         try
         {
@@ -193,7 +304,7 @@ public sealed partial class TravianClient
                 if (available < troop.Value)
                 {
                     Notify($"[farm-raid] not enough troops for {label}: slot t{troop.Key} needs {troop.Value}, {available} at home.");
-                    return FarmRaidOutcome.NotEnoughTroops;
+                    return (FarmRaidOutcome.NotEnoughTroops, returnAtUtc);
                 }
             }
 
@@ -202,7 +313,7 @@ public sealed partial class TravianClient
                 if (!await TryFillTroopInputAsync($"t{troop.Key}", $"troop slot {troop.Key}", troop.Value, cancellationToken))
                 {
                     Notify($"[farm-raid] could not fill troop slot t{troop.Key} for {label}.");
-                    return FarmRaidOutcome.Failed;
+                    return (FarmRaidOutcome.Failed, returnAtUtc);
                 }
             }
 
@@ -212,7 +323,7 @@ public sealed partial class TravianClient
                 || !await TryTypeHumanlyIntoFirstMatchingInputAsync(["input[name='y']"], yText, cancellationToken))
             {
                 Notify($"[farm-raid] could not enter coordinates for {label}.");
-                return FarmRaidOutcome.Failed;
+                return (FarmRaidOutcome.Failed, returnAtUtc);
             }
 
             // eventType 4 is "Attack: Raid" on the Official send-troops form.
@@ -220,7 +331,7 @@ public sealed partial class TravianClient
             if (await raidRadio.CountAsync() == 0)
             {
                 Notify($"[farm-raid] raid option not found on the send-troops form for {label}.");
-                return FarmRaidOutcome.Failed;
+                return (FarmRaidOutcome.Failed, returnAtUtc);
             }
 
             await DelayBeforeClickAsync(cancellationToken, "farm raid: raid mode");
@@ -230,7 +341,7 @@ public sealed partial class TravianClient
             if (await firstSend.CountAsync() == 0)
             {
                 Notify($"[farm-raid] Send button not found for {label}.");
-                return FarmRaidOutcome.Failed;
+                return (FarmRaidOutcome.Failed, returnAtUtc);
             }
 
             await DelayBeforeClickAsync(cancellationToken, "farm raid: Send");
@@ -239,14 +350,19 @@ public sealed partial class TravianClient
             {
                 var error = await ReadReinforcementFormErrorAsync(cancellationToken);
                 Notify($"[farm-raid] {label} was rejected: {error ?? "the confirmation page did not load"}.");
-                return FarmRaidOutcome.Failed;
+                return (FarmRaidOutcome.Failed, returnAtUtc);
+            }
+
+            if (await ReadTroopEvasionTravelTimeAsync(cancellationToken) is { } oneWay)
+            {
+                returnAtUtc = DateTimeOffset.UtcNow + oneWay + oneWay + TimeSpan.FromSeconds(30);
             }
 
             var finalConfirm = _page.Locator("button#confirmSendTroops.rallyPointConfirm[name='confirmSendTroops']").First;
             if (await finalConfirm.CountAsync() == 0)
             {
                 Notify($"[farm-raid] Confirm button not found for {label}.");
-                return FarmRaidOutcome.Failed;
+                return (FarmRaidOutcome.Failed, returnAtUtc);
             }
 
             await DelayBeforeClickAsync(cancellationToken, "farm raid: Confirm");
@@ -255,17 +371,17 @@ public sealed partial class TravianClient
             if (await _page.Locator("button#confirmSendTroops.rallyPointConfirm[name='confirmSendTroops']").CountAsync() > 0)
             {
                 Notify($"[farm-raid] {label}: final confirmation could not be verified.");
-                return FarmRaidOutcome.Failed;
+                return (FarmRaidOutcome.Failed, returnAtUtc);
             }
 
             var troopsText = string.Join(", ", target.Troops.Select(troop => $"t{troop.Key}×{troop.Value}"));
-            Notify($"[farm-raid] raid sent to {label} with {troopsText}.");
-            return FarmRaidOutcome.Sent;
+            Notify($"[farm-raid] raid sent to {label} with {troopsText}; troops back around {returnAtUtc.ToLocalTime():HH:mm}.");
+            return (FarmRaidOutcome.Sent, returnAtUtc);
         }
         catch (PlaywrightException ex)
         {
             Notify($"[farm-raid] {label} failed: {ex.Message}");
-            return FarmRaidOutcome.Failed;
+            return (FarmRaidOutcome.Failed, returnAtUtc);
         }
     }
 }

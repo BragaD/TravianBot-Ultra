@@ -32,11 +32,14 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
      list. The oasis scan and the Travco inactive-village search find targets you can add to a list.
      The game itself only lets Gold Club accounts press a list's Start button, so without Gold Club
      the bot sends each active target of the selected lists as an ordinary raid from the Rally Point.
+     In that mode it remembers which raids are still out and skips those targets, and it reads your
+     raid reports: a target whose latest raid lost troops is put on hold until you release it.
    - **Troops** — per-village training rules for Barracks, Stable and Workshop, Smithy upgrade
      targets, and Town Hall and Brewery celebrations.
    - **Transfers** — send resources and reinforcements between your own villages on a schedule.
    - **Catapults** — prepare a first attack plus following waves and send them together.
-   - **Settings** — NPC trade and gold limits, bonus videos (25% faster build, +15% production),
+   - **Settings** — startup (log in and start the bot when the app opens) and session pacing (play
+     for a while, close the browser for a break, optional active hours), NPC trade and gold limits, bonus videos (25% faster build, +15% production),
      and marking messages and reports as read. NPC trade runs for upgrades and resource fields; the
      engine does not trade when constructing a brand-new building.
 4. **Start bot**. The Dashboard shows what runs next; the **Log** tab shows everything the bot does.
@@ -52,6 +55,5 @@ Set `TBOT_ROOT` to use a different folder (for example one per account when runn
 
 ## Not in the macOS build
 
-The Windows app has more tools than this front-end exposes yet: building templates, session
-pacing/auto-sleep, proxy library and failover, incoming-attack alerts, report screenshots, and the
+The Windows app has more tools than this front-end exposes yet: building templates, proxy library and failover, incoming-attack alerts, report screenshots, and the
 Windows app's automatic build planning (storage preflight, requirement repair, time estimates).

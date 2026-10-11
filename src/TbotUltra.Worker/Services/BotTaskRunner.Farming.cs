@@ -232,6 +232,7 @@ public sealed partial class BotTaskRunner
     // the caller can prefer the regular list Start when it is.
     public async Task<(bool GoldClubActive, FarmRaidBatchResult? Result)> SendFarmListTargetsAsRaidsUnlessGoldClubAsync(
         BotOptions options,
+        FarmRaidGuard guard,
         Action<string> log,
         string? accountName = null,
         CancellationToken cancellationToken = default)
@@ -250,15 +251,14 @@ public sealed partial class BotTaskRunner
                 goldClubActive = await client.ReadGoldClubStatusAsync(cancellationToken);
                 if (!goldClubActive)
                 {
-                    foreach (var request in CreateFarmListLossHandlingRequests(options))
-                    {
-                        var losses = await new ManualFarmingOperation(client).HandleLossTargetsAsync(request, cancellationToken);
-                        log($"Farm list {request.LossColors.ToString().ToLowerInvariant()} loss handling: found={losses.RowsFound}, deactivated={losses.RowsDeactivated}, moved={losses.RowsMoved}.");
-                    }
-
+                    // Rally Point raids never appear on the farm list, so the list's own loss rows stay
+                    // empty here; losses are read from the raid reports inside the sender instead.
                     result = await client.SendFarmListTargetsAsRaidsAsync(
                         options.ContinuousFarmListNames,
                         options.ContinuousFarmListIds,
+                        guard,
+                        holdOnSomeLosses: options.ContinuousFarmDeactivateYellowLosses || options.ContinuousFarmDeactivateYellowOasisLosses,
+                        holdOnAllLost: options.ContinuousFarmDeactivateRedLosses || options.ContinuousFarmDeactivateRedOasisLosses,
                         cancellationToken);
                 }
             });

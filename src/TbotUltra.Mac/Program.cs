@@ -83,6 +83,7 @@ app.MapGet("/api/state", () =>
         running = engine.Running,
         busy = engine.Busy,
         activity = engine.Activity,
+        sleepingUntil = engine.SleepingUntilUtc,
         alert = engine.Alert,
         prompt = engine.Prompt,
         tribe = engine.Tribe,
@@ -192,6 +193,24 @@ app.MapPost("/api/start", () =>
 });
 
 app.MapPost("/api/stop", () => Fire(engine.StopAsync));
+
+app.MapPost("/api/wake", () =>
+{
+    engine.WakeNow();
+    return Results.Ok();
+});
+
+app.MapPut("/api/settings/startup", (StartupSettings startup) =>
+{
+    settings.Update(RequireAccount(), current => current.Startup = startup);
+    return Results.Ok();
+});
+
+app.MapPost("/api/farmlists/release", (FarmTargetKey target) =>
+{
+    engine.ReleaseFarmTarget(target.Key);
+    return Results.Ok();
+});
 
 app.MapPost("/api/alert/clear", () =>
 {
@@ -333,6 +352,18 @@ await app.StartAsync();
 var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
 log.Add($"[mac] Tbot Ultra for macOS {ReadVersion()} — data folder: {root}");
 
+_ = Task.Run(async () =>
+{
+    try
+    {
+        await engine.RunStartupAsync();
+    }
+    catch (Exception ex)
+    {
+        log.Add($"[mac] automatic startup failed: {ex.Message}");
+    }
+});
+
 // The native window shell reads this line to learn where the UI is served.
 Console.WriteLine($"TBOT_LISTENING {address}");
 if (args.Contains("--open"))
@@ -397,6 +428,8 @@ static string ReadVersion()
 internal sealed record PromptAnswer(string Id, string? Value);
 
 internal sealed record JobRequest(string Key);
+
+internal sealed record FarmTargetKey(string Key);
 
 internal sealed record PageRequest(string Path);
 

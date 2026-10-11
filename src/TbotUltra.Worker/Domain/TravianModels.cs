@@ -414,7 +414,32 @@ public sealed record FarmListOverview(
 
 public sealed record FarmListSendEntry(string Name, string? ListId);
 
-public sealed record FarmRaidBatchResult(int ListCount, int Sent, int AlreadyRunning, int WaitingForTroops, int Failed);
+/// <summary>One raid the no-Gold-Club sender dispatched, with when its troops are expected home.</summary>
+public sealed record FarmRaidSent(int X, int Y, DateTimeOffset ReturnAtUtc);
+
+/// <summary>A target taken out of rotation because a raid report showed losses.</summary>
+public sealed record FarmRaidLoss(int X, int Y, bool AllLost, long ReportId);
+
+/// <summary>
+/// What the caller remembers between rounds for the no-Gold-Club sender: raids sent from the Rally
+/// Point never show on the farm list, so in-flight targets and loss reports are tracked here instead.
+/// Keys are "x|y".
+/// </summary>
+public sealed record FarmRaidGuard(
+    IReadOnlyDictionary<string, DateTimeOffset> BusyUntilUtc,
+    IReadOnlyCollection<string> Blocked,
+    long LastReportId);
+
+public sealed record FarmRaidBatchResult(
+    int ListCount,
+    int Sent,
+    int AlreadyRunning,
+    int WaitingForTroops,
+    int Failed,
+    int SkippedOnHold = 0,
+    IReadOnlyList<FarmRaidSent>? SentRaids = null,
+    IReadOnlyList<FarmRaidLoss>? NewLosses = null,
+    long LastReportId = 0);
 
 public sealed record FarmListSendBatchResult(
     IReadOnlyList<FarmListSendEntry> AttemptedLists,

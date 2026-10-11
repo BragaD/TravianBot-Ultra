@@ -52,8 +52,33 @@ public sealed class VillageSettings
     public bool Brewery { get; set; }
 }
 
+public sealed class StartupSettings
+{
+    public bool AutoLogin { get; set; }
+    public bool AutoStart { get; set; }
+}
+
+public sealed class HeldTarget
+{
+    public string Reason { get; set; } = string.Empty;
+    public DateTimeOffset SinceUtc { get; set; }
+}
+
+/// <summary>
+/// What the no-Gold-Club raid sender remembers between rounds: raids sent from the Rally Point do
+/// not show on the farm list, so in-flight targets and loss reports are tracked here. Keys are "x|y".
+/// </summary>
+public sealed class FarmRaidState
+{
+    public long LastReportId { get; set; }
+    public Dictionary<string, DateTimeOffset> BusyUntilUtc { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, HeldTarget> OnHold { get; set; } = new(StringComparer.Ordinal);
+}
+
 public sealed class MacSettings
 {
+    public StartupSettings Startup { get; set; } = new();
+    public FarmRaidState FarmRaids { get; set; } = new();
     public FeatureToggles Features { get; set; } = new();
 
     /// <summary>Account-level engine option overrides, keyed by <c>BotOptionPayloadKeys</c> names.</summary>

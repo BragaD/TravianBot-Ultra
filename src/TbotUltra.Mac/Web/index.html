@@ -57,6 +57,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   <span class="status"><span class="dot" id="dot"></span><span id="activity">Loading…</span></span>
   <button class="btn" id="btnLogin">Log in</button>
   <button class="btn primary" id="btnStart">Start bot</button>
+  <button class="btn" id="btnWake" data-post="/api/wake" style="display:none">Wake now</button>
   <button class="btn" id="btnStop">Stop</button>
   <button class="btn" id="btnLogout">Log out</button>
 </header>
@@ -110,8 +111,9 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
     <div class="card"><h2>Farm lists</h2><div class="row" id="farmOptions"></div></div>
     <div class="card"><div class="row"><h2 style="margin:0;flex:1">Lists to send</h2><button class="btn" id="btnFarmRefresh">Read farm lists</button></div>
       <p class="muted">Leave every list unticked to send all lists.</p><div id="farmLists" class="muted">No farm lists read yet.</div></div>
+    <div class="card"><h2>Raids in progress and targets on hold</h2><div id="raidState" class="muted">Nothing yet.</div></div>
     <div class="card"><h2>Targets with losses</h2>
-      <p class="muted" style="margin-top:0">Before each send, targets whose last raid lost troops can be switched off or moved to another list.</p>
+      <p class="muted" style="margin-top:0">Before each send, targets whose last raid lost troops are taken out of rotation. Without Gold Club the bot reads your raid reports for this and puts the target on hold (listed above); moving to another list needs Gold Club.</p>
       <div id="farmLossOptions"></div></div>
     <div class="card"><h2>Create a farm list</h2><div class="row" id="farmCreate"></div></div>
     <div class="card"><h2>Add targets to a list</h2><div class="row" id="farmTargets"></div>
@@ -142,6 +144,10 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
       <div class="row" style="margin-top:8px"><button class="btn" data-post="/api/production-bonus">Activate +15% production now</button></div></div>
     <div class="card"><h2>Messages and reports</h2><button class="btn" data-post="/api/inbox/read">Mark all as read now</button></div>
     <div class="card"><h2>Pacing</h2><div class="row" id="pacingOptions"></div></div>
+    <div class="card"><h2>Startup</h2><div class="row" id="startupOptions"></div></div>
+    <div class="card"><h2>Session pacing</h2>
+      <p class="muted" style="margin-top:0">Play for a while, then close the browser and come back later, like a person would. Outside the active hours the bot stays logged out.</p>
+      <div class="row" id="sessionOptions"></div></div>
     <div class="card"><h2>Game language</h2><p class="muted" style="margin-top:0">The game must be set to English for the bot to read pages.</p><button class="btn" id="btnEnglish">Set game language to English</button></div>
     <div class="card"><h2>Data</h2><div class="muted" id="dataRoot"></div></div>
   </section>
@@ -225,6 +231,10 @@ document.addEventListener("change", async event => {
   } else if (el.dataset.farm !== undefined) {
     const picked = [...document.querySelectorAll("[data-farm]:checked")];
     await api("PUT", "/api/settings/farmlists", { names: picked.map(i => i.dataset.farm), ids: picked.map(i => i.dataset.farmId).filter(Boolean) });
+  } else if (el.dataset.startup) {
+    state.settings.startup = { ...(state.settings.startup || {}), [el.dataset.startup]: el.checked };
+    if (el.dataset.startup === "autoStart" && el.checked) state.settings.startup.autoLogin = true;
+    await api("PUT", "/api/settings/startup", state.settings.startup);
   } else if (el.classList.contains("statMax")) {
     await saveHeroStats($("heroStats").dataset.order.split(","));
   } else if (el.dataset.lossDest) {
@@ -290,6 +300,15 @@ function renderStatic() {
     boolOption("construct_faster_random_enabled", "only sometimes", false),
     numberOption("construct_faster_random_chance_percent", "chance %", 50, 1, 100),
     boolOption("turn_off_video_sound", "Mute videos", true)].join("");
+  const startup = state.settings.startup || {};
+  $("startupOptions").innerHTML = `<label><input type="checkbox" data-startup="autoLogin" ${startup.autoLogin ? "checked" : ""}> Log in when the app opens</label>
+    <label><input type="checkbox" data-startup="autoStart" ${startup.autoStart ? "checked" : ""}> …and start the bot</label>`;
+  $("sessionOptions").innerHTML = [
+    boolOption("mac_pacing_enabled", "Take breaks", true),
+    numberOption("mac_pacing_run_min_minutes", "Play for", 60, 1, 1440), numberOption("mac_pacing_run_max_minutes", "to", 150, 1, 1440), "<span>minutes,</span>",
+    numberOption("mac_pacing_sleep_min_minutes", "then rest", 15, 1, 1440), numberOption("mac_pacing_sleep_max_minutes", "to", 45, 1, 1440), "<span>minutes.</span>",
+    numberOption("mac_active_from_hour", "Active from hour", 0, 0, 24), numberOption("mac_active_to_hour", "to hour", 24, 0, 24),
+    '<span class="muted">(0 to 24 = all day; a range like 22 to 6 runs overnight)</span>'].join("");
   $("pacingOptions").innerHTML = [
     boolOption("action_pacing_enabled", "Human-like pauses between clicks and page loads", true)].join("");
   $("dataRoot").textContent = `Accounts, settings and logs are stored in ${state.dataRoot}`;
@@ -304,10 +323,11 @@ function renderHeader() {
   picker.disabled = state.loggedIn || !!state.busy || state.accounts.length < 2;
   $("activity").textContent = state.busy ? `${state.busy}…` : state.activity;
   $("dot").className = "dot" + (state.busy ? " busy" : state.running ? " on" : "");
-  $("btnLogin").disabled = state.loggedIn || !!state.busy || !state.accounts.length;
+  $("btnWake").style.display = state.sleepingUntil ? "" : "none";
+  $("btnLogin").disabled = state.loggedIn || state.running || !!state.busy || !state.accounts.length;
   $("btnStart").disabled = !state.loggedIn || state.running || !!state.busy;
   $("btnStop").disabled = !state.running;
-  $("btnLogout").disabled = !state.loggedIn;
+  $("btnLogout").disabled = !state.loggedIn && !state.running;
   $("btnLogin").textContent = state.busy === "Logging in" ? "Logging in…" : "Log in";
   if (state.alert) showAlert(state.alert);
 }
@@ -500,7 +520,7 @@ async function refresh() {
   if (state.tribe !== catalogTribe) { catalog = await api("GET", "/api/catalog"); catalogTribe = state.tribe; }
   const editing = document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
   if (staticRenderedFor !== state.activeAccount || !editing) { renderStatic(); staticRenderedFor = state.activeAccount; }
-  renderHeader(); renderDashboard(); renderBuild(); renderTroops(); renderHero(); renderHeroStats(); renderFarming(); renderFarmLoss(); renderFarmForms(); renderScan(); renderTransfers(); renderCatapults(); renderAccounts(); renderPrompt();
+  renderHeader(); renderDashboard(); renderBuild(); renderTroops(); renderHero(); renderHeroStats(); renderFarming(); renderFarmLoss(); renderRaidState(); renderFarmForms(); renderScan(); renderTransfers(); renderCatapults(); renderAccounts(); renderPrompt();
 }
 async function pollLogs() {
   const lines = await api("GET", `/api/logs?after=${lastLogId}`);
@@ -573,6 +593,18 @@ function renderFarmLoss() {
     ${boolOption(`continuous_farm_deactivate_${color}_oasis_losses`, "Switch off oases", false)}
     ${boolOption(`continuous_farm_move_${color}_losses`, "Move instead to", false)} ${destination(color)}</div>`;
   $("farmLossOptions").innerHTML = row("red", "Heavy losses (red)") + row("yellow", "Some losses (yellow)");
+}
+
+function renderRaidState() {
+  const raids = state.settings.farmRaids || { busyUntilUtc: {}, onHold: {} };
+  const busy = Object.entries(raids.busyUntilUtc || {}).filter(([, until]) => new Date(until) > Date.now());
+  const held = Object.entries(raids.onHold || {});
+  $("raidState").innerHTML = (busy.length || held.length) ? `
+    ${busy.map(([key, until]) => `<span class="pill">${esc(key)} back ${when(until)}</span>`).join(" ")}
+    ${held.length ? `<table style="margin-top:8px"><tr><th>Target</th><th>Why</th><th>Since</th><th></th></tr>${held.map(([key, info]) =>
+      `<tr><td>${esc(key)}</td><td>${esc(info.reason)}</td><td>${new Date(info.sinceUtc).toLocaleString()}</td>
+       <td><button class="mini" data-release="${esc(key)}">Raid again</button></td></tr>`).join("")}</table>` : ""}`
+    : "No raids are out and no targets are on hold.";
 }
 
 // ----- Target search ---------------------------------------------------------------------------
@@ -660,6 +692,7 @@ function renderCatapults() {
 document.addEventListener("click", async event => {
   const d = event.target.dataset, id = event.target.id;
   if (d.post) { showAlert(""); await api("POST", d.post); return refresh(); }
+  if (d.release) { await api("POST", "/api/farmlists/release", { key: d.release }); return refresh(); }
   if (d.statMove) {
     const order = $("heroStats").dataset.order.split(","), i = order.indexOf(d.statMove), j = i + Number(d.dir);
     if (j >= 0 && j < order.length) { [order[i], order[j]] = [order[j], order[i]]; await saveHeroStats(order); }
