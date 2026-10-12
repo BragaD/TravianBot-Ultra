@@ -91,6 +91,7 @@ change anything this way; changes need the HTTP API.
     "population": 82, "automated": true, "updatedUtc": "…",
     "stock": [{ "resource": "wood", "current": 4528, "capacity": 6300,
                 "perHour": 3790, "fullAtUtc": "…" }, …],
+    "cropBalancePerHour": 1853,   // crop per hour after upkeep; negative means troops will starve
     "warehouseCapacity": 6300, "granaryCapacity": 1700,
     "fields":    [{ "slotId": 1, "type": "wood", "name": "Woodcutter", "level": 6 }, …],
     "buildings": [{ "slotId": 26, "name": "Main Building", "level": 11, "gid": 15 }, …],
@@ -186,7 +187,8 @@ An item whose `status` is `blocked` is skipped; its `note` says why.
 
 Returns `{"queue": [...], "notes": [...]}`. With `"preflight": true` (the default follows the user's
 setting) the app inserts any Warehouse or Granary upgrade an item needs so that every level fits in
-storage; `notes` lists what it added. Read `notes` — they also report anything it could not plan.
+storage; `notes` lists what it added. Read `notes` — they also report anything it could not plan,
+and a "Crop warning" when the queued upkeep would push the village's crop balance below zero.
 
 ### Edit one item
 

@@ -286,8 +286,75 @@ public static class BuildPlanner
     // UI text is English, so numbers are too, whatever the Mac's region is.
     private static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// Crop check for one item: how much crop per hour the village will have left once everything
+    /// already queued and this item are built. Buildings and fields eat crop; cropland adds it, which
+    /// this estimate leaves out, so a warning errs on the safe side.
+    /// </summary>
+    public static string? CropWarning(VillageView village, IReadOnlyList<BuildItem> queue, BuildItem item)
+    {
+        var cropPerHour = village.Stock?.FirstOrDefault(entry => entry.Resource == "crop")?.PerHour;
+        if (cropPerHour is null || item.Type == "building_demolish")
+        {
+            return null;
+        }
+
+        var state = new Projection(village, []);
+        long queued = 0;
+        foreach (var earlier in queue)
+        {
+            queued += Upkeep(village, state, earlier);
+            state.Apply(earlier);
+        }
+
+        var own = Upkeep(village, state, item);
+        var left = cropPerHour.Value - queued - own;
+        if (own <= 0 || left >= 0)
+        {
+            return null;
+        }
+
+        return $"Crop warning: {BotEngine.DescribeBuildItem(item)} adds {Number(own)} crop per hour of upkeep"
+            + (queued > 0 ? $" on top of {Number(queued)} already queued" : string.Empty)
+            + $". The village makes {Number((long)cropPerHour.Value)} per hour, so it would end about {Number((long)-left)} per hour short. Queue cropland first.";
+    }
+
+    private static long Upkeep(VillageView village, Projection state, BuildItem item)
+    {
+        long upkeep = 0;
+        foreach (var (gid, from, to) in LevelRanges(village, state, item))
+        {
+            // Cropland produces crop instead of consuming it.
+            if (gid != 4 && to > from)
+            {
+                upkeep += BuildingCatalogService.AdditionalUpkeepForUpgrade(gid, from, to) ?? 0;
+            }
+        }
+
+        return upkeep;
+    }
+
     // The largest single-level cost the item will hit: (wood/clay/iron maximum, crop maximum).
     private static (long Warehouse, long Granary) MaxCost(VillageView village, Projection state, BuildItem item)
+    {
+        long warehouse = 0, granary = 0;
+        foreach (var (gid, from, to) in LevelRanges(village, state, item))
+        {
+            for (var level = from + 1; level <= to; level++)
+            {
+                if (BuildingCatalogService.CostFor(gid, level) is { } cost)
+                {
+                    warehouse = Math.Max(warehouse, Math.Max(cost.Wood, Math.Max(cost.Clay, cost.Iron)));
+                    granary = Math.Max(granary, cost.Crop);
+                }
+            }
+        }
+
+        return (warehouse, granary);
+    }
+
+    // Which building types the item raises, and between which levels.
+    private static List<(int Gid, int From, int To)> LevelRanges(VillageView village, Projection state, BuildItem item)
     {
         var ranges = new List<(int Gid, int From, int To)>();
         switch (item.Type)
@@ -297,8 +364,11 @@ public static class BuildPlanner
                 {
                     if (FieldGids.TryGetValue(type, out var fieldGid))
                     {
-                        var levels = village.Fields.Where(field => string.Equals(field.Type, type, StringComparison.OrdinalIgnoreCase)).Select(field => field.Level ?? 0).ToList();
-                        ranges.Add((fieldGid, levels.Count > 0 ? levels.Min() : 0, item.TargetLevel));
+                        // One range per field: costs peak at the lowest field, upkeep adds up over all.
+                        foreach (var field in village.Fields.Where(field => string.Equals(field.Type, type, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            ranges.Add((fieldGid, field.Level ?? 0, item.TargetLevel));
+                        }
                     }
                 }
 
@@ -324,20 +394,7 @@ public static class BuildPlanner
                 break;
         }
 
-        long warehouse = 0, granary = 0;
-        foreach (var (gid, from, to) in ranges)
-        {
-            for (var level = from + 1; level <= to; level++)
-            {
-                if (BuildingCatalogService.CostFor(gid, level) is { } cost)
-                {
-                    warehouse = Math.Max(warehouse, Math.Max(cost.Wood, Math.Max(cost.Clay, cost.Iron)));
-                    granary = Math.Max(granary, cost.Crop);
-                }
-            }
-        }
-
-        return (warehouse, granary);
+        return ranges;
     }
 
     /// <summary>The village's buildings as they will be once everything already queued has run.</summary>

@@ -745,6 +745,7 @@ public sealed class BotEngine
 
                 await RespondToAttacksAsync(account, settings, cancellationToken);
                 GuardAgainstOverflow(account.Name, settings);
+                WatchCropBalance(account.Name, settings);
                 var jobs = BuildJobs(settings, account.Name);
                 var now = DateTimeOffset.UtcNow;
                 Job? next;
@@ -1028,6 +1029,36 @@ public sealed class BotEngine
         return added > 0 ? $"Added {added} new empty oasis target(s)." : "No new empty oases nearby.";
     }
 
+    // ----- Crop balance ----------------------------------------------------------------------------
+
+    private readonly Dictionary<string, DateTimeOffset> _cropWarnedAt = new(StringComparer.OrdinalIgnoreCase);
+
+    // A negative crop balance starves troops once the granary is empty; say so once an hour.
+    private void WatchCropBalance(string accountName, MacSettings settings)
+    {
+        foreach (var village in Villages(accountName))
+        {
+            var crop = village.Stock?.FirstOrDefault(item => item.Resource == "crop");
+            if (crop?.PerHour is not < 0
+                || (_cropWarnedAt.TryGetValue(village.Key, out var warnedAt) && DateTimeOffset.UtcNow - warnedAt < TimeSpan.FromHours(1)))
+            {
+                continue;
+            }
+
+            _cropWarnedAt[village.Key] = DateTimeOffset.UtcNow;
+            var hoursLeft = crop.Current is > 0 ? crop.Current.Value / -crop.PerHour.Value : 0;
+            var text = $"{village.Name} loses {(-crop.PerHour.Value).ToString("N0", CultureInfo.InvariantCulture)} crop per hour"
+                + $" and has about {hoursLeft.ToString("0.#", CultureInfo.InvariantCulture)} hours of crop left. Build cropland or troops will starve.";
+            Log($"[mac] CROP: {text}");
+            Alert = $"Crop is running out: {text}";
+            RecordEvent($"Crop balance negative in {village.Name}", text);
+            if (OptionOn(settings, "mac_attack_notify"))
+            {
+                Notify("Tbot Ultra — crop is running out", text);
+            }
+        }
+    }
+
     // ----- Overflow guard ---------------------------------------------------------------------------
 
     // When a resource is about to hit its storage cap, production is wasted: train troops if the
@@ -1072,7 +1103,14 @@ public sealed class BotEngine
             }
 
             var maxFieldLevel = village.IsCapital == true ? 20 : 10;
-            var field = village.Fields.Where(item => item.SlotId is not null && (item.Level ?? 0) < maxFieldLevel).OrderBy(item => item.Level ?? 0).FirstOrDefault();
+
+            // When the crop balance is thin, the spare resources go into cropland first.
+            var cropPerHour = stock.FirstOrDefault(item => item.Resource == "crop")?.PerHour;
+            var field = village.Fields
+                .Where(item => item.SlotId is not null && (item.Level ?? 0) < maxFieldLevel)
+                .OrderByDescending(item => cropPerHour is < 100 && string.Equals(item.Type, "crop", StringComparison.OrdinalIgnoreCase))
+                .ThenBy(item => item.Level ?? 0)
+                .FirstOrDefault();
             if (settings.Features.Construction && field is not null && !villageSettings.BuildQueue.Any(item => item.Status == "pending"))
             {
                 _settings.Update(accountName, current =>

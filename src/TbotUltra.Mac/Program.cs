@@ -171,6 +171,11 @@ app.MapPut("/api/villages/{key}/build", (string key, QueueReplacement request) =
                 notes.AddRange(plan.Notes);
             }
 
+            if (BuildPlanner.CropWarning(village, queued, item) is { } cropWarning)
+            {
+                notes.Add(cropWarning);
+            }
+
             queued.Add(item);
         }
 
@@ -423,6 +428,11 @@ app.MapPost("/api/villages/{key}/build", (string key, BuildItem item) =>
             notes.AddRange(plan.Notes);
         }
 
+        if (BuildPlanner.CropWarning(village, queue, item) is { } cropWarning)
+        {
+            notes.Add(cropWarning);
+        }
+
         queue.Add(item);
     });
     return Results.Json(new { item.Id, notes });
@@ -619,6 +629,7 @@ object BuildSummary()
                 automated = villageSettings?.Enabled ?? true,
                 village.UpdatedUtc,
                 stock = village.Stock,
+                cropBalancePerHour = village.Stock?.FirstOrDefault(entry => entry.Resource == "crop")?.PerHour,
                 warehouseCapacity = village.Warehouse,
                 granaryCapacity = village.Granary,
                 fields = village.Fields,

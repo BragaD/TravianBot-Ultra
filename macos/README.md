@@ -25,7 +25,8 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
    - **Building** — per-village build queue: all resource fields to a level, a single field, upgrade
      a building to a level or to its maximum, construct a new one, or demolish one. Items run top to
      bottom. When an item costs more than the Warehouse or Granary can hold, the storage upgrade it
-     needs is queued in front of it. Building templates are reusable build orders you can apply to
+     needs is queued in front of it, and you are warned when the queued upkeep would push the crop
+     balance below zero. Building templates are reusable build orders you can apply to
      any village.
    - **Hero** — adventures (minimum HP, shortest/first), auto-revive, the order and maximum for
      attribute points, adventure bonus videos, and using the hero's inventory resources when a
