@@ -273,6 +273,7 @@ Current values are `settings.options` in `GET /api/state`; anything not listed t
 | `mac_attack_notify` | `true`/`false` | macOS notification when a new attack is seen. |
 | `mac_attack_spend_enabled`, `mac_attack_spend_lead_minutes` | `true`/`false`, minutes | Run the village's build and training jobs this long before a hit, so less can be plundered. |
 | `mac_evasion_enabled`, `mac_evasion_target`, `mac_evasion_lead_minutes`, `mac_evasion_include_hero` | `true`/`false`, `"x\|y"`, minutes, `true`/`false` | Shortly before a hit, send all troops on a raid to the target, timed to return after it. **Sends an attack**: see section 9. |
+| `mac_autofarm_enabled`, `mac_autofarm_radius`, `mac_autofarm_max_per_run`, `mac_autofarm_interval_hours`, `mac_autofarm_troop`, `mac_autofarm_troop_count`, `mac_autofarm_list` | `true`/`false`, fields, count, hours, troop name, count, list name | Periodically add the nearest empty, unoccupied oases to a farm list. **Adds attack targets**: see section 9. Job key `autofarm`. |
 | `mac_overflow_guard_enabled`, `mac_overflow_threshold_percent` | `true`/`false`, `50`–`100` | When a resource reaches this share of storage: train troops, and queue one field upgrade if no build item is pending. |
 | `npc_trade_enabled`, `npc_trade_construction_enabled`, `allow_gold_spending`, `gold_limit`, `daily_gold_spending_limit` | see section 9 | NPC trade. **Spends gold.** |
 
@@ -362,7 +363,7 @@ These cost something real or act on other players. Do them only when the user ha
 
 - **Spending gold**: turning on `allow_gold_spending`, `npc_trade_enabled` or
   `npc_trade_construction_enabled`, or lowering `gold_limit`.
-- **Attacks**: turning on `mac_evasion_enabled` or changing `mac_evasion_target`,
+- **Attacks**: turning on `mac_autofarm_enabled`, turning on `mac_evasion_enabled` or changing `mac_evasion_target`,
   `POST /api/catapults/send`, adding farm targets, creating farm lists, releasing a
   target that is on hold after losses, answering a `confirm` prompt.
 - **Demolition**: `building_demolish` items.

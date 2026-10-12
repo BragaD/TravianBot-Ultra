@@ -69,6 +69,15 @@ public static class MacDefaults
         ["mac_evasion_include_hero"] = "true",
         ["mac_evasion_lead_minutes"] = "6",
 
+        // Farm growth: find empty oases nearby and add them to a farm list.
+        ["mac_autofarm_enabled"] = "false",
+        ["mac_autofarm_radius"] = "10",
+        ["mac_autofarm_list"] = "Auto oases",
+        ["mac_autofarm_troop"] = "",
+        ["mac_autofarm_troop_count"] = "20",
+        ["mac_autofarm_max_per_run"] = "3",
+        ["mac_autofarm_interval_hours"] = "12",
+
         // Overflow guard: spend resources before storage caps.
         ["mac_overflow_guard_enabled"] = "true",
         ["mac_overflow_threshold_percent"] = "90",

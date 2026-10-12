@@ -149,6 +149,9 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
     <div class="card"><h2>Create a farm list</h2><div class="row" id="farmCreate"></div></div>
     <div class="card"><h2>Add targets to a list</h2><div class="row" id="farmTargets"></div>
       <p class="muted">Coordinates like <code>12|-34</code>, separated by spaces or new lines. Each target is raided with the troops chosen here.</p></div>
+    <div class="card"><h2>Grow the farm list automatically</h2>
+      <p class="muted" style="margin-top:0">Every so often the bot scans around each village and adds the nearest empty oases (no animals, not occupied) it does not already raid. They are raided on the normal schedule.</p>
+      <div class="row" id="autofarmOptions"></div></div>
     <div class="card"><h2>Find targets</h2>
       <h3>Oasis scan</h3><div class="row" id="oasisForm"></div>
       <h3>Travco inactive villages</h3><div class="row" id="travcoForm"></div></div>
@@ -352,6 +355,15 @@ function renderStatic() {
     boolOption("construct_faster_random_enabled", "only sometimes", false),
     numberOption("construct_faster_random_chance_percent", "chance %", 50, 1, 100),
     boolOption("turn_off_video_sound", "Mute videos", true)].join("");
+  $("autofarmOptions").innerHTML = [
+    boolOption("mac_autofarm_enabled", "Add empty oases", false),
+    numberOption("mac_autofarm_radius", "within", 10, 1, 40), "<span>fields,</span>",
+    numberOption("mac_autofarm_max_per_run", "up to", 3, 1, 20), "<span>per search,</span>",
+    numberOption("mac_autofarm_interval_hours", "every", 12, 1, 168), "<span>hours.</span>",
+    `<label>Raid with <select data-opt="mac_autofarm_troop"><option value="">(first barracks unit)</option>${(catalog?.troops?.all || []).map(t =>
+      `<option ${t.name === opt("mac_autofarm_troop", "") ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></label>`,
+    numberOption("mac_autofarm_troop_count", "×", 20, 1, 10000),
+    textOption("mac_autofarm_list", "into list", "Auto oases")].join("");
   $("attackOptions").innerHTML = [
     boolOption("mac_attack_notify", "Notify me", true),
     boolOption("mac_attack_spend_enabled", "Spend resources (build, train) before the hit", true),

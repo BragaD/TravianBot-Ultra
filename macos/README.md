@@ -35,7 +35,8 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
      valleys (croppers flagged). Training and sending the settlers is still done by hand.
    - **Farming** — create farm lists, add targets by coordinates, and send lists on a timer (all
      lists, or only the ones you tick). Targets with losses can be switched off or moved to another
-     list. The oasis scan and the Travco inactive-village search find targets you can add to a list.
+     list. The oasis scan and the Travco inactive-village search find targets you can add to a list,
+     and the bot can grow a list by itself by adding nearby empty oases every few hours.
      The game itself only lets Gold Club accounts press a list's Start button, so without Gold Club
      the bot sends each active target of the selected lists as an ordinary raid from the Rally Point.
      In that mode it remembers which raids are still out and skips those targets, and it reads your

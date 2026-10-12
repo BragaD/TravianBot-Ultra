@@ -105,6 +105,7 @@ public sealed class BotEngine
     private const string MarkReadTask = "mark_inbox_read";
     private const string AttackWatchTask = "watch_incoming_attacks";
     private const string CultureTask = "read_culture_points";
+    private const string AutoFarmTask = "grow_farm_lists";
 
     private readonly object _sync = new();
     private readonly string _root;
@@ -937,6 +938,96 @@ public sealed class BotEngine
 
     public void TestNotification() => Notify("Tbot Ultra", "Notifications are working.");
 
+    // ----- Farm growth -----------------------------------------------------------------------------
+
+    // Scans around each village for unoccupied oases without animals and adds the nearest new ones
+    // to a farm list, a few per run so the list grows the way a player would build it.
+    private async Task<string> GrowFarmListAsync(AccountEntry account, MacSettings settings, BotOptions options, CancellationToken cancellationToken)
+    {
+        var listName = PacingValue(settings, "mac_autofarm_list").Trim();
+        if (listName.Length == 0)
+        {
+            return "No farm list name is set.";
+        }
+
+        var troop = PacingValue(settings, "mac_autofarm_troop").Trim();
+        if (troop.Length == 0)
+        {
+            troop = TbotUltra.Core.Travian.TroopCatalog
+                .ResolveTroopTypesForTribe(_tribe, TbotUltra.Core.Travian.TroopTrainingBuildingType.Barracks)
+                .FirstOrDefault() ?? string.Empty;
+        }
+
+        if (troop.Length == 0)
+        {
+            return "No troop type is set for new farm targets.";
+        }
+
+        var troopCount = PacingMinutes(settings, "mac_autofarm_troop_count");
+        var maxPerRun = PacingMinutes(settings, "mac_autofarm_max_per_run");
+        var radius = Math.Clamp(PacingMinutes(settings, "mac_autofarm_radius"), 1, 40);
+        var lists = await _runner.ReadFarmListsOverviewAsync(options, Log, cancellationToken: cancellationToken);
+        ApplyFarmLists(lists);
+        var known = lists.SelectMany(list => list.FarmCoordinates ?? []).ToHashSet(StringComparer.Ordinal);
+        known.UnionWith(settings.FarmRaids.OnHold.Keys);
+
+        var added = 0;
+        foreach (var village in Villages(account.Name))
+        {
+            if (village.X is not int x || village.Y is not int y
+                || (settings.Villages.TryGetValue(village.Key, out var villageSettings) && !villageSettings.Enabled))
+            {
+                continue;
+            }
+
+            var scan = await _runner.ScanMapOasesAsync(
+                options,
+                includeOccupied: false,
+                ["Wood", "Clay", "Iron", "Crop", "Wood+Crop", "Clay+Crop", "Iron+Crop"],
+                new MapOasisScanRequest(x, y, MapOasisScanScope.Radius, radius, MapOasisScanSpeed.Normal),
+                Log,
+                progress: null,
+                cancellationToken: cancellationToken);
+            var targets = scan.Oases
+                .Where(oasis => !oasis.IsOccupied && string.IsNullOrWhiteSpace(oasis.Animals) && !known.Contains($"{oasis.X}|{oasis.Y}"))
+                .OrderBy(oasis => Math.Pow(oasis.X - x, 2) + Math.Pow(oasis.Y - y, 2))
+                .Take(maxPerRun)
+                .Select(oasis => new FarmCoordinate(oasis.X, oasis.Y, RequireUnoccupiedOasis: true, IsOasis: true))
+                .ToList();
+            if (targets.Count == 0)
+            {
+                continue;
+            }
+
+            // One list per village, so each raid leaves from the village that found the target.
+            var villageList = Villages(account.Name).Count > 1 ? $"{listName} {village.Name}" : listName;
+            if (!lists.Any(list => string.Equals(list.Name, villageList, StringComparison.OrdinalIgnoreCase)))
+            {
+                var villageId = Regex.Match(village.Url ?? string.Empty, @"newdid=(\d+)") is { Success: true } match ? match.Groups[1].Value : null;
+                await _runner.CreateFarmListsAsync(
+                    options, new FarmListCreateRequest([villageList], village.Name, villageId, troop, troopCount), Log, cancellationToken: cancellationToken);
+            }
+
+            var result = await _runner.AddFarmsFromCoordinatesAsync(
+                options, villageList, troop, troopCount, targets.Count, targets, useDefaultTroops: false, Log, cancellationToken: cancellationToken);
+            added += result.AddedCount;
+            known.UnionWith(targets.Select(target => $"{target.X}|{target.Y}"));
+            Log($"[mac] farm growth for {village.Name}: added {result.AddedCount} empty oasis target(s) to '{villageList}', {result.FailedCount} refused.");
+
+            // When the user sends only chosen lists, the new list must be one of them to be raided.
+            _settings.Update(account.Name, current =>
+            {
+                if (current.FarmListNames.Count > 0 && !current.FarmListNames.Contains(villageList, StringComparer.OrdinalIgnoreCase))
+                {
+                    current.FarmListNames.Add(villageList);
+                }
+            });
+        }
+
+        ApplyFarmLists(await _runner.ReadFarmListsOverviewAsync(options, Log, cancellationToken: cancellationToken));
+        return added > 0 ? $"Added {added} new empty oasis target(s)." : "No new empty oases nearby.";
+    }
+
     // ----- Overflow guard ---------------------------------------------------------------------------
 
     // When a resource is about to hit its storage cap, production is wasted: train troops if the
@@ -1115,6 +1206,14 @@ public sealed class BotEngine
         var options = BotOptionsPayloadApplier.Apply(BuildOptions(account, settings), job.Payload);
         try
         {
+            if (job.Task == AutoFarmTask)
+            {
+                var summary = await GrowFarmListAsync(account, settings, options, cancellationToken);
+                var hours = Math.Max(1, PacingMinutes(settings, "mac_autofarm_interval_hours"));
+                Schedule(job.Key, TimeSpan.FromMinutes((hours * 60) + Random.Shared.Next(0, 30)), summary);
+                return;
+            }
+
             if (job.Task == CultureTask)
             {
                 await ReadCultureCoreAsync(options, cancellationToken);
@@ -1455,6 +1554,11 @@ public sealed class BotEngine
         if (features.AttackWatch)
         {
             jobs.Add(new Job("attack_watch", "Watch for incoming attacks", AttackWatchTask, empty, 4, 8));
+        }
+
+        if (features.Farming && OptionOn(settings, "mac_autofarm_enabled"))
+        {
+            jobs.Add(new Job("autofarm", "Find new farm targets", AutoFarmTask, empty, 720, 750));
         }
 
         if (features.MarkRead)
