@@ -23,7 +23,10 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
 2. **Log in** — a Chrome window opens and logs in. Your villages appear on the Dashboard.
 3. Pick what to automate on the **Dashboard**, then configure it:
    - **Building** — per-village build queue: all resource fields to a level, a single field, upgrade
-     a building to a level or to its maximum, construct a new one, or demolish one. Items run top to bottom.
+     a building to a level or to its maximum, construct a new one, or demolish one. Items run top to
+     bottom. When an item costs more than the Warehouse or Granary can hold, the storage upgrade it
+     needs is queued in front of it. Building templates are reusable build orders you can apply to
+     any village.
    - **Hero** — adventures (minimum HP, shortest/first), auto-revive, the order and maximum for
      attribute points, adventure bonus videos, and using the hero's inventory resources when a
      build is short on resources.
@@ -40,11 +43,17 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
    - **Catapults** — prepare a first attack plus following waves and send them together.
    - **Settings** — startup (log in and start the bot when the app opens) and session pacing (play
      for a while, close the browser for a break, optional active hours), NPC trade and gold limits, bonus videos (25% faster build, +15% production),
-     and marking messages and reports as read. NPC trade runs for upgrades and resource fields; the
-     engine does not trade when constructing a brand-new building.
+     and marking messages and reports as read.
 4. **Start bot**. The Dashboard shows what runs next; the **Log** tab shows everything the bot does.
 
 The game language must be English (Settings → *Set game language to English*).
+
+## AI agents
+
+An agent can read the bot's state and change its tasks and build plans through the app's local
+API. While the app runs, `~/Library/Application Support/TbotUltra/agent/` holds the connection
+details, a state snapshot, a `tbot` command-line helper and the guide; the same guide is in
+[docs/AGENT_API.md](../docs/AGENT_API.md).
 
 ## Data
 
@@ -55,5 +64,5 @@ Set `TBOT_ROOT` to use a different folder (for example one per account when runn
 
 ## Not in the macOS build
 
-The Windows app has more tools than this front-end exposes yet: building templates, proxy library and failover, incoming-attack alerts, report screenshots, and the
-Windows app's automatic build planning (storage preflight, requirement repair, time estimates).
+The Windows app has more tools than this front-end exposes yet: proxy library and failover, incoming-attack alerts, report screenshots, and the
+Windows app's deeper build planning (requirement repair, time estimates).

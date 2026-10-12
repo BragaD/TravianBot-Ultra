@@ -58,6 +58,8 @@ public static class MacDefaults
         ["reinforcements_send_min_minutes"] = "60",
         ["reinforcements_send_max_minutes"] = "120",
 
+        ["mac_storage_preflight"] = "true",
+
         // Session pacing is the Mac loop's own: play for a while, close the browser, come back later.
         ["mac_pacing_enabled"] = "true",
         ["mac_pacing_run_min_minutes"] = "60",

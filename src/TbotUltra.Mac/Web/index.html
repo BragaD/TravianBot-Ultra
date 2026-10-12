@@ -40,12 +40,36 @@ table { border-collapse: collapse; width: 100%; } td, th { padding: 5px 8px; bor
 th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .muted { color: var(--muted); } .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
 .pill { display: inline-block; padding: 1px 7px; border-radius: 10px; background: var(--panel2); font-size: 11px; color: var(--muted); }
+#notice { display: none; background: #1f2b3d; border-bottom: 1px solid var(--accent); color: #cfe0ff; padding: 8px 16px; white-space: pre-line; }
 #alert { display: none; background: #3a2320; border-bottom: 1px solid var(--bad); color: #ffd2cb; padding: 8px 16px; }
 #logs { font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
 #logs div { padding: 0 2px; } #logs .t { color: var(--muted); }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 18px; max-width: 520px; }
 dialog::backdrop { background: rgba(0,0,0,.55); }
 .res { display: flex; gap: 14px; flex-wrap: wrap; } .res span b { font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.tile .label { color: var(--muted); font-size: 12px; }
+.tile .value { font-size: 20px; font-weight: 600; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.wide { grid-column: span 2; }
+.vgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.vcard { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+.vcard h3 { color: var(--text); font-size: 14px; margin: 0; }
+.meterRow { display: grid; grid-template-columns: 38px 1fr; column-gap: 8px; align-items: center; margin-top: 7px; }
+.meterRow .name { color: var(--muted); font-size: 12px; }
+.meterRow .nums { grid-column: 2; display: flex; justify-content: space-between; font-size: 12px; }
+/* Meter: the fill carries the state, the track is a lighter step of the same colour. */
+.meter { height: 6px; border-radius: 4px; background: rgba(76,141,255,.18); overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.meter.warn { background: rgba(224,168,58,.2); } .meter.warn i { background: var(--warn); }
+.meter.bad { background: rgba(229,96,79,.22); } .meter.bad i { background: var(--bad); }
+.vlines { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 4px; font-size: 12px; }
+.vlines .k { color: var(--muted); display: inline-block; width: 74px; }
+.twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
+.twocol .card { margin-bottom: 12px; min-width: 0; }
+.evt { display: grid; grid-template-columns: 62px 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.evt:last-child { border-bottom: 0; }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .tabs button.btn.sel { border-color: var(--accent); color: #fff; }
 </style>
@@ -62,6 +86,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   <button class="btn" id="btnLogout">Log out</button>
 </header>
 <div id="alert"></div>
+<div id="notice" title="Click to dismiss"></div>
 <main>
   <nav id="nav">
     <button data-tab="dashboard" class="active">Dashboard</button>
@@ -78,9 +103,14 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   </nav>
 
   <section id="tab-dashboard" class="active">
+    <div class="tiles" id="tiles"></div>
+    <div class="row" style="margin:14px 0 8px"><h2 style="margin:0;flex:1">Villages</h2><span class="muted" id="villagesNote"></span><button class="btn" id="btnScan">Scan all villages</button></div>
+    <div id="villageCards" class="vgrid"></div>
+    <div class="twocol">
+      <div class="card"><h2>Scheduled work</h2><div id="jobs" class="muted">Nothing scheduled.</div></div>
+      <div class="card"><h2>Recent activity</h2><div id="events" class="muted">Nothing yet.</div></div>
+    </div>
     <div class="card"><h2>Automation</h2><div class="row" id="features"></div></div>
-    <div class="card"><h2>Scheduled work</h2><div id="jobs" class="muted">Nothing scheduled.</div></div>
-    <div class="card"><div class="row"><h2 style="margin:0;flex:1">Villages</h2><button class="btn" id="btnScan">Scan all villages</button></div><div id="villageCards" class="grid" style="margin-top:10px"></div></div>
   </section>
 
   <section id="tab-villages">
@@ -196,6 +226,7 @@ async function api(method, path, body) {
   return text ? JSON.parse(text) : null;
 }
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+function showNotice(lines) { const el = $("notice"); el.textContent = (lines || []).join("\n"); el.style.display = lines && lines.length ? "block" : "none"; }
 function showAlert(message) { const el = $("alert"); el.textContent = message; el.style.display = message ? "block" : "none"; }
 function when(iso) {
   if (!iso) return "";
@@ -276,7 +307,8 @@ function renderStatic() {
     numberOption("continuous_farm_dispatch_delay_max_minutes", "to (max minutes)", 90, 1, 1440)].join("");
   $("constructionOptions").innerHTML = [
     selectOption("resource_build_strategy", "Resource field order", "lowest_first", [["lowest_first", "Lowest level first"], ["smart", "Smart (by need)"]]),
-    boolOption("construction_humanize_delay_enabled", "Random delay before queueing the next build", false)].join("");
+    boolOption("construction_humanize_delay_enabled", "Random delay before queueing the next build", true),
+    boolOption("mac_storage_preflight", "Add the Warehouse/Granary upgrades a build needs", true)].join("");
   $("heroVideoOptions").innerHTML = [
     boolOption("increase_adventures_to_hard", "Raise adventures to hard before sending", false),
     boolOption("reduce_adventure_time", "Shorten adventure time by 25%", false),
@@ -332,22 +364,91 @@ function renderHeader() {
   if (state.alert) showAlert(state.alert);
 }
 
+const fmt = n => n == null ? "–" : Math.round(n).toLocaleString("en-US");
+const tile = (label, value, sub, wide) => `<div class="tile ${wide ? "wide" : ""}"><div class="label">${esc(label)}</div><div class="value">${value}</div><div class="sub">${sub || "&nbsp;"}</div></div>`;
+function countdown(iso) {
+  if (!iso) return "";
+  const seconds = Math.round((new Date(iso) - Date.now()) / 1000);
+  if (seconds <= 0) return "done";
+  const h = Math.floor(seconds / 3600), m = Math.floor((seconds % 3600) / 60), sec = seconds % 60;
+  return h ? `${h}h ${String(m).padStart(2, "0")}m` : m ? `${m}m ${String(sec).padStart(2, "0")}s` : `${sec}s`;
+}
+// Stock is a snapshot taken at updatedUtc; production since then is added so the bars stay current.
+function liveStock(village) {
+  const hours = village.updatedUtc ? Math.max(0, (Date.now() - new Date(village.updatedUtc)) / 3600000) : 0;
+  const parse = text => text == null ? null : Number(String(text).replace(/[^0-9-]/g, ""));
+  return ["wood", "clay", "iron", "crop"].map(resource => {
+    const entry = (village.stock || []).find(item => item.resource === resource) || {};
+    const capacity = entry.capacity ?? (resource === "crop" ? village.granary : village.warehouse);
+    const snapshot = entry.current ?? parse(village.resources?.[resource]);
+    const current = snapshot == null ? null : Math.max(0, Math.min(capacity ?? Infinity, snapshot + (entry.perHour || 0) * hours));
+    return { resource, current, capacity, perHour: entry.perHour };
+  });
+}
+function meterRow(item) {
+  if (item.current == null || !item.capacity) return `<div class="meterRow"><span class="name">${item.resource}</span><span class="muted">not read yet</span></div>`;
+  const ratio = Math.min(1, item.current / item.capacity), percent = Math.round(ratio * 100);
+  const state = ratio >= 0.95 ? "bad" : ratio >= 0.75 ? "warn" : "";
+  const toFull = item.perHour > 0 && ratio < 1 ? (item.capacity - item.current) / item.perHour * 3600 : null;
+  const note = ratio >= 1 ? "full — production is wasted" : toFull != null ? `full in ${countdown(new Date(Date.now() + toFull * 1000).toISOString())}`
+    : item.perHour < 0 ? "shrinking" : "";
+  return `<div class="meterRow"><span class="name">${item.resource}</span><div class="meter ${state}" title="${percent}% of storage"><i style="width:${percent}%"></i></div>
+    <div class="nums"><span>${fmt(item.current)} / ${fmt(item.capacity)}${item.perHour != null ? ` <span class="muted">${item.perHour >= 0 ? "+" : ""}${fmt(item.perHour)}/h</span>` : ""}</span>
+      <span class="${state === "bad" ? "bad" : state === "warn" ? "warn" : "muted"}">${percent}%${note ? " · " + note : ""}</span></div></div>`;
+}
+
 function renderDashboard() {
-  $("jobs").innerHTML = state.jobs.length ? `<table><tr><th>Work</th><th>Next run</th><th>Last result</th><th></th></tr>${state.jobs.map(job =>
-    `<tr><td>${esc(job.title)}</td><td style="white-space:nowrap">${when(job.dueUtc)}</td><td class="muted">${esc(job.lastResult)}</td>
-     <td style="white-space:nowrap"><button class="mini" data-run="${esc(job.key)}">Run now</button></td></tr>`).join("")}</table>`
-    : "Nothing scheduled. Turn on a feature above, or add items to a village's build queue.";
+  // ----- tiles
+  const sleeping = !!state.sleepingUntil;
+  const mode = state.busy ? state.busy : sleeping ? "Sleeping" : state.running ? "Running" : state.loggedIn ? "Stopped" : "Logged out";
+  const nextJob = state.jobs[0];
+  const modeSub = sleeping ? `Back at ${new Date(state.sleepingUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+    : state.running && nextJob ? `Next: ${esc(nextJob.title)} ${when(nextJob.dueUtc)}` : esc(state.activity);
+  const hero = state.hero, account = state.account, raids = state.settings.farmRaids || {};
+  const raidsOut = Object.values(raids.busyUntilUtc || {}).filter(until => new Date(until) > Date.now()).length;
+  const onHold = Object.keys(raids.onHold || {}).length;
+  const population = state.villages.reduce((sum, v) => sum + (v.population || 0), 0);
+  const queued = Object.values(state.settings.villages || {}).reduce((sum, v) => sum + (v.buildQueue || []).length, 0);
+  $("tiles").innerHTML = [
+    tile("Bot", esc(mode), modeSub, true),
+    tile("Villages", state.villages.length, population ? `${fmt(population)} population` : esc(state.tribe)),
+    tile("Build queue", queued, queued ? "items waiting" : "nothing queued"),
+    tile("Hero", hero ? (hero.hp != null ? `${hero.hp}% HP` : esc(hero.state)) : "–", hero ? `${hero.adventures} adventure${hero.adventures === 1 ? "" : "s"} · ${esc(hero.state)}` : "log in to read"),
+    tile("Raids out", raidsOut, `${onHold} target${onHold === 1 ? "" : "s"} on hold`),
+    tile("Gold", fmt(account?.gold), account?.silver != null ? `${fmt(account.silver)} silver` : ""),
+    tile("Unread", account ? account.unreadReports + account.unreadMessages : "–", account ? `${account.unreadReports} reports · ${account.unreadMessages} messages` : ""),
+  ].join("");
+
+  // ----- villages
+  $("villagesNote").textContent = state.villages.length ? "" : "";
   $("villageCards").innerHTML = state.villages.length ? state.villages.map(v => {
     const vs = state.settings.villages[v.key] || {};
-    const res = ["wood", "clay", "iron", "crop"].map(k => `<span>${k} <b>${esc(v.resources[k] ?? "–")}</b></span>`).join("");
-    const building = (v.constructions || []).map(c => `${esc(c.name)} ${c.level ?? ""} ${when(c.finishUtc)}`).join(", ");
-    return `<div class="card" style="margin:0"><div class="row"><b style="flex:1">${esc(v.name)}</b>
-      ${v.isCapital ? '<span class="pill">capital</span>' : ""}<span class="pill">${v.x ?? "?"}|${v.y ?? "?"}</span></div>
-      <div class="res" style="margin:6px 0">${res}</div>
-      <div class="muted">${building ? "Building: " + building : "No construction running"}</div>
-      <div class="muted">Queue: ${(vs.buildQueue || []).length} item(s)</div>
-      <label style="margin-top:6px"><input type="checkbox" data-village="${esc(v.key)}" data-village-field="enabled" ${vs.enabled !== false ? "checked" : ""}> Automate this village</label></div>`;
-  }).join("") : '<div class="muted">Log in to load your villages.</div>';
+    const queue = vs.buildQueue || [], first = queue.find(item => item.status === "pending"), blocked = queue.filter(item => item.status === "blocked").length;
+    const building = (v.constructions || []).filter(c => !c.finishUtc || new Date(c.finishUtc) > Date.now());
+    const training = (v.training || []).filter(t => !t.finishUtc || new Date(t.finishUtc) > Date.now());
+    const age = v.updatedUtc ? Math.round((Date.now() - new Date(v.updatedUtc)) / 60000) : null;
+    return `<div class="vcard"><div class="row"><h3 style="flex:1">${esc(v.name)}</h3>
+        ${v.isCapital ? '<span class="pill">capital</span>' : ""}<span class="pill">${v.x ?? "?"}|${v.y ?? "?"}</span>${v.population ? `<span class="pill">pop ${fmt(v.population)}</span>` : ""}</div>
+      ${liveStock(v).map(meterRow).join("")}
+      <div class="vlines">
+        <div><span class="k">Building</span>${building.length ? building.map(c => `${esc(c.name)} ${c.level ?? ""} <span class="muted">${countdown(c.finishUtc)}</span>`).join(" · ") : '<span class="muted">idle</span>'}</div>
+        <div><span class="k">Training</span>${training.length ? training.map(t => `${esc(t.building)} <span class="muted">${countdown(t.finishUtc)}</span>`).join(" · ") : '<span class="muted">idle</span>'}</div>
+        <div><span class="k">Queue</span>${first ? `${esc(describeItem(first))}${queue.length > 1 ? ` <span class="muted">+${queue.length - 1} more</span>` : ""}` : '<span class="muted">empty</span>'}
+          ${blocked ? `<span class="bad"> · ${blocked} blocked</span>` : ""}</div>
+      </div>
+      <div class="row" style="margin-top:8px"><label style="flex:1"><input type="checkbox" data-village="${esc(v.key)}" data-village-field="enabled" ${vs.enabled !== false ? "checked" : ""}> Automate this village</label>
+        <span class="muted">${age == null ? "not read yet" : age < 1 ? "read just now" : `read ${age} min ago`}</span></div></div>`;
+  }).join("") : '<div class="card muted" style="margin:0">Log in to load your villages.</div>';
+
+  // ----- scheduled work and activity
+  $("jobs").innerHTML = state.jobs.length ? `<table><tr><th>Work</th><th>Next run</th><th></th></tr>${state.jobs.map(job =>
+    `<tr><td>${esc(job.title)}<div class="muted">${esc(job.lastResult)}</div></td><td style="white-space:nowrap">${when(job.dueUtc)}</td>
+     <td style="white-space:nowrap"><button class="mini" data-run="${esc(job.key)}">Run now</button></td></tr>`).join("")}</table>`
+    : "Nothing scheduled. Turn on a feature below, or add items to a village's build queue.";
+  const events = state.events || [];
+  $("events").innerHTML = events.length ? events.slice(0, 14).map(event =>
+    `<div class="evt"><span class="muted">${new Date(event.at).toLocaleTimeString("en-GB")}</span>
+     <span>${esc(event.title)}<div class="muted">${esc(event.result)}</div></span></div>`).join("") : "Nothing yet. Finished work shows up here.";
 }
 
 function villageTabs(containerId) {
@@ -369,6 +470,8 @@ function renderBuild() {
   const village = villageTabs("villageTabsBuild");
   if (!village) { $("buildPane").innerHTML = '<div class="card muted">Log in to load your villages.</div>'; return; }
   if (document.activeElement && $("buildPane").contains(document.activeElement) && document.activeElement.tagName !== "BUTTON") return;
+  if (editingTemplate && $("tplEditor")) return;
+  if ($("tplPick")?.value) selectedTemplate = $("tplPick").value;
   const vs = state.settings.villages[village.key] || { buildQueue: [] };
   const queue = vs.buildQueue.length ? `<table><tr><th>#</th><th>Item</th><th>Status</th><th></th></tr>${vs.buildQueue.map((item, i) =>
     `<tr><td>${i + 1}</td><td>${esc(describeItem(item))}</td>
@@ -404,8 +507,31 @@ function renderBuild() {
       <div class="row"><select id="constructGid">${catalogOptions}</select>
         <label>in <select id="constructSlot">${emptySlots || "<option value=''>No empty slot known</option>"}</select></label>
         <label>to level <input type="number" id="constructLevel" min="1" max="20" value="1"></label><button class="btn" data-add="building_construct">Add</button></div>
+      <h3>Building templates</h3>
+      <div class="row"><select id="tplPick">${(state.templates || []).map(t => `<option value="${t.id}" ${t.id === selectedTemplate ? "selected" : ""}>${esc(t.name)} (${t.steps.length} steps)</option>`).join("") || "<option value=''>No templates yet</option>"}</select>
+        <button class="btn" id="btnTplApply">Add to this village's queue</button><button class="btn" id="btnTplEdit">Edit</button>
+        <button class="btn danger" id="btnTplDelete">Delete</button>
+        <span style="flex:1"></span><input type="text" id="tplNewName" placeholder="New template name" style="width:170px">
+        <button class="btn" id="btnTplFromQueue">Save this queue as a template</button><button class="btn" id="btnTplNew">New empty</button></div>
+      <div id="tplEditor"></div>
       <p class="muted">Village data last read ${village.updatedUtc ? new Date(village.updatedUtc).toLocaleString() : "never"}. Use “Scan all villages” on the Dashboard to refresh slots.</p>
     </div>`;
+}
+
+let selectedTemplate = null, editingTemplate = null;
+function renderTemplateEditor() {
+  const box = $("tplEditor"); if (!box) return;
+  if (!editingTemplate) { box.innerHTML = ""; return; }
+  const t = editingTemplate;
+  box.innerHTML = `<div class="card" style="margin-top:10px"><div class="row"><label>Name <input type="text" id="tplName" value="${esc(t.name)}"></label>
+      <span style="flex:1"></span><button class="btn primary" id="btnTplSave">Save template</button><button class="btn" id="btnTplCancel">Close</button></div>
+    <table style="margin-top:8px"><tr><th>#</th><th>Step</th><th></th></tr>${t.steps.map((s, i) =>
+      `<tr><td>${i + 1}</td><td>${s.kind === "resources" ? `Resource fields (${esc(s.resourceTypes)}) to level ${s.targetLevel}` : `${esc(s.name)} to level ${s.targetLevel}`}</td>
+       <td style="white-space:nowrap"><button class="mini" data-tpl-step="up" data-i="${i}">↑</button><button class="mini" data-tpl-step="down" data-i="${i}">↓</button>
+         <button class="mini" data-tpl-step="remove" data-i="${i}">✕</button></td></tr>`).join("") || '<tr><td colspan="3" class="muted">No steps yet.</td></tr>'}</table>
+    <div class="row" style="margin-top:8px"><select id="tplStepGid"><option value="">Resource fields (all types)</option>${(catalog?.buildings || []).map(b =>
+        `<option value="${b.gid}" data-name="${esc(b.name)}">${esc(b.name)}</option>`).join("")}</select>
+      <label>to level <input type="number" id="tplStepLevel" min="1" max="25" value="5"></label><button class="btn" id="btnTplStepAdd">Add step</button></div></div>`;
 }
 
 const TROOP_BUILDINGS = [["barracks", "Barracks"], ["stable", "Stable"], ["workshop", "Workshop"]];
@@ -548,6 +674,7 @@ $("btnLogin").onclick = post("/api/login"); $("btnStart").onclick = post("/api/s
 $("btnLogout").onclick = post("/api/logout"); $("btnScan").onclick = post("/api/scan"); $("btnFarmRefresh").onclick = post("/api/farmlists/refresh");
 $("btnHeroRefresh").onclick = post("/api/hero/refresh"); $("btnEnglish").onclick = post("/api/language/english");
 $("btnClearLog").onclick = () => { $("logs").innerHTML = ""; };
+$("notice").onclick = () => showNotice([]);
 $("alert").onclick = async () => { showAlert(""); await api("POST", "/api/alert/clear"); };
 $("accountPicker").onchange = async event => { await api("POST", `/api/accounts/${encodeURIComponent(event.target.value)}/activate`); refresh(); };
 $("btnSaveAccount").onclick = async () => {
@@ -692,6 +819,49 @@ function renderCatapults() {
 document.addEventListener("click", async event => {
   const d = event.target.dataset, id = event.target.id;
   if (d.post) { showAlert(""); await api("POST", d.post); return refresh(); }
+  if (id === "btnTplApply") {
+    if (!$("tplPick").value) return showAlert("Create a template first.");
+    const result = await api("POST", `/api/villages/${encodeURIComponent(selectedVillage)}/template/${$("tplPick").value}`);
+    showNotice([`Added ${result.added} item(s) to the queue.`, ...result.notes]); document.activeElement?.blur(); return refresh();
+  }
+  if (id === "btnTplEdit" || id === "btnTplNew") {
+    const name = $("tplNewName").value.trim();
+    if (id === "btnTplNew" && !name) return showAlert("Type a name for the new template.");
+    const picked = (state.templates || []).find(t => t.id === $("tplPick").value);
+    if (id === "btnTplEdit" && !picked) return showAlert("Create a template first.");
+    editingTemplate = id === "btnTplNew" ? { id: "", name, steps: [] } : JSON.parse(JSON.stringify(picked));
+    return renderTemplateEditor();
+  }
+  if (id === "btnTplFromQueue") {
+    const name = $("tplNewName").value.trim(); if (!name) return showAlert("Type a name for the new template.");
+    const saved = await api("POST", `/api/villages/${encodeURIComponent(selectedVillage)}/template-from-queue`, { name });
+    selectedTemplate = saved.id; document.activeElement?.blur(); return refresh();
+  }
+  if (id === "btnTplDelete") {
+    const picked = (state.templates || []).find(t => t.id === $("tplPick").value); if (!picked) return;
+    if (confirm(`Delete the template “${picked.name}”?`)) { await api("DELETE", `/api/templates/${picked.id}`); editingTemplate = null; document.activeElement?.blur(); return refresh(); }
+    return;
+  }
+  if (id === "btnTplCancel") { editingTemplate = null; return renderTemplateEditor(); }
+  if (id === "btnTplStepAdd") {
+    const option = $("tplStepGid").selectedOptions[0], level = Number($("tplStepLevel").value) || 1;
+    editingTemplate.name = $("tplName").value;
+    editingTemplate.steps.push(option.value ? { kind: "building", gid: Number(option.value), name: option.dataset.name, targetLevel: level, resourceTypes: "" }
+      : { kind: "resources", gid: null, name: "Resource fields", targetLevel: level, resourceTypes: "wood,clay,iron,crop" });
+    return renderTemplateEditor();
+  }
+  if (d.tplStep) {
+    const i = Number(d.i), steps = editingTemplate.steps; editingTemplate.name = $("tplName").value;
+    if (d.tplStep === "remove") steps.splice(i, 1);
+    if (d.tplStep === "up" && i > 0) [steps[i - 1], steps[i]] = [steps[i], steps[i - 1]];
+    if (d.tplStep === "down" && i < steps.length - 1) [steps[i + 1], steps[i]] = [steps[i], steps[i + 1]];
+    return renderTemplateEditor();
+  }
+  if (id === "btnTplSave") {
+    editingTemplate.name = $("tplName").value;
+    const saved = await api("PUT", "/api/templates", editingTemplate);
+    selectedTemplate = saved.id; editingTemplate = null; document.activeElement?.blur(); return refresh();
+  }
   if (d.release) { await api("POST", "/api/farmlists/release", { key: d.release }); return refresh(); }
   if (d.statMove) {
     const order = $("heroStats").dataset.order.split(","), i = order.indexOf(d.statMove), j = i + Number(d.dir);
@@ -797,7 +967,8 @@ async function addBuildItem(type) {
     if (!slot || !building.value) return showAlert("Scan the village first so empty slots are known.");
     item = { ...item, slotId: Number(slot), gid: Number(building.value), name: building.name, targetLevel: Number($("constructLevel").value) };
   }
-  await api("POST", `/api/villages/${encodeURIComponent(selectedVillage)}/build`, item);
+  const added = await api("POST", `/api/villages/${encodeURIComponent(selectedVillage)}/build`, item);
+  showNotice(added?.notes);
   document.activeElement?.blur(); await refresh();
 }
 

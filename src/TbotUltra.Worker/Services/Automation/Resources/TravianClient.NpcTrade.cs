@@ -106,11 +106,14 @@ public sealed partial class TravianClient
         return true;
     }
 
+    // constructGid: on a construction-choice page several buildings each have their own exchange
+    // button; passing the gid restricts the trade to that building's contract.
     private async Task<bool> TryNpcTradeForConstructionAsync(
         string label,
         CancellationToken cancellationToken,
         bool bypassEnabledSetting = false,
-        bool bypassGoldGates = false)
+        bool bypassGoldGates = false,
+        int? constructGid = null)
     {
         if (!_config.NpcTradeConstructionEnabled && !bypassEnabledSetting)
         {
@@ -135,14 +138,15 @@ public sealed partial class TravianClient
         }
 
         var currency = await ReadCurrencyAsync(cancellationToken);
-        return await TryNpcTradeForCurrentPageAsync(label, currency.Gold, cancellationToken, bypassGoldGates);
+        return await TryNpcTradeForCurrentPageAsync(label, currency.Gold, cancellationToken, bypassGoldGates, constructGid);
     }
 
     private async Task<bool> TryNpcTradeForCurrentPageAsync(
         string label,
         int? gold,
         CancellationToken cancellationToken,
-        bool bypassGoldGates = false)
+        bool bypassGoldGates = false,
+        int? constructGid = null)
     {
         if (!_config.AllowGoldSpending && !bypassGoldGates)
         {
@@ -169,7 +173,7 @@ public sealed partial class TravianClient
 
         var goldText = gold?.ToString() ?? "unknown";
         Notify($"NPC trade: triggering at {label} because the page indicates missing resources (gold {goldText}).");
-        return await ExecuteConstructionNpcTradeClicksAsync(label, cancellationToken);
+        return await ExecuteConstructionNpcTradeClicksAsync(label, cancellationToken, constructGid);
     }
 
     private async Task<bool> TryReserveNpcTradeGoldAsync(string label, CancellationToken cancellationToken)
@@ -206,10 +210,10 @@ public sealed partial class TravianClient
         }
     }
 
-    private async Task<bool> ExecuteConstructionNpcTradeClicksAsync(string label, CancellationToken cancellationToken)
+    private async Task<bool> ExecuteConstructionNpcTradeClicksAsync(string label, CancellationToken cancellationToken, int? constructGid = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var candidateIndex = await FindConstructionNpcTradeButtonIndexAsync(cancellationToken);
+        var candidateIndex = await FindConstructionNpcTradeButtonIndexAsync(cancellationToken, constructGid);
         if (candidateIndex is null)
         {
             Notify($"NPC trade: skip at {label}. NPC trade button not found on the page.");
@@ -262,12 +266,14 @@ public sealed partial class TravianClient
         return true;
     }
 
-    private async Task<int?> FindConstructionNpcTradeButtonIndexAsync(CancellationToken cancellationToken)
+    private async Task<int?> FindConstructionNpcTradeButtonIndexAsync(CancellationToken cancellationToken, int? constructGid = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var index = await _page.EvaluateAsync<int?>(
             """
-            () => {
+            (constructGid) => {
+              const scope = constructGid ? document.querySelector(`#contract_building${constructGid}`) : null;
+              if (constructGid && !scope) return null;
               const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
               const candidates = Array.from(document.querySelectorAll(
                 'button, input[type="submit"], input[type="button"], a, div.addHoverClick, div.button-container'
@@ -276,6 +282,7 @@ public sealed partial class TravianClient
 
               for (let i = 0; i < candidates.length; i += 1) {
                 const element = candidates[i];
+                if (scope && !scope.contains(element)) continue;
                 const text = clean(element.textContent || element.value || '').toLowerCase();
                 const classes = clean(element.className || '').toLowerCase();
                 const title = clean(element.getAttribute('title') || '').toLowerCase();
@@ -304,7 +311,8 @@ public sealed partial class TravianClient
               matches.sort((a, b) => b.rank - a.rank);
               return matches.length > 0 ? matches[0].index : null;
             }
-            """);
+            """,
+            constructGid);
 
         return index;
     }

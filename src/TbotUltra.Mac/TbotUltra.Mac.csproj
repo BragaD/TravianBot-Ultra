@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Web\index.html" LogicalName="TbotUltra.Mac.Web.index.html" />
+    <EmbeddedResource Include="..\..\docs\AGENT_API.md" LogicalName="TbotUltra.Mac.Agent.guide.md" />
+    <EmbeddedResource Include="..\..\macos\tbot" LogicalName="TbotUltra.Mac.Agent.tbot" />
     <EmbeddedResource Include="..\..\.release-template\config\bot.json" LogicalName="TbotUltra.Mac.Data.bot.json" />
   </ItemGroup>
 </Project>

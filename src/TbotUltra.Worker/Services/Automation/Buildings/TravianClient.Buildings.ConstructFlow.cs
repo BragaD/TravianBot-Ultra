@@ -341,9 +341,19 @@ public sealed partial class TravianClient : IBuildingClient
                         if (!constructionNpcTradeAttempted)
                         {
                             constructionNpcTradeAttempted = true;
-                            if (await TryNpcTradeForConstructionAsync($"Building slot {slotId} construct {buildingName}", cancellationToken))
+                            if (_config.NpcTradeConstructionEnabled && _config.AllowGoldSpending)
                             {
-                                continue;
+                                // The queue check above leaves the browser on dorf2, but the exchange
+                                // control only exists on the construction page: go back to it, and trade
+                                // only through this building's own contract.
+                                await GotoAsync(url, cancellationToken);
+                                if (await TryNpcTradeForConstructionAsync(
+                                        $"Building slot {slotId} construct {buildingName}",
+                                        cancellationToken,
+                                        constructGid: gid))
+                                {
+                                    continue;
+                                }
                             }
                         }
 

@@ -24,6 +24,7 @@ var log = new LogBuffer(Path.Combine(root, "logs"));
 var accounts = new AccountStore(Path.Combine(root, ".env"));
 var settings = new SettingsStore(root);
 var engine = new BotEngine(root, accounts, settings, log);
+var templates = new TemplateStore(root);
 
 var app = builder.Build();
 
@@ -45,11 +46,19 @@ app.Use(async (context, next) =>
         return;
     }
 
+    // Agents identify themselves with X-Tbot-Agent so every change they make is visible in the log.
+    if (context.Request.Headers.TryGetValue("X-Tbot-Agent", out var agentName)
+        && !HttpMethods.IsGet(context.Request.Method))
+    {
+        var name = new string(agentName.ToString().Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or ' ').Take(40).ToArray());
+        log.Add($"[agent:{name}] {context.Request.Method} {context.Request.Path}");
+    }
+
     try
     {
         await next();
     }
-    catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException)
+    catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or FormatException or System.Text.Json.JsonException or BadHttpRequestException)
     {
         context.Response.StatusCode = StatusCodes.Status400BadRequest;
         await context.Response.WriteAsJsonAsync(new { error = ex.Message });
@@ -89,16 +98,84 @@ app.MapGet("/api/state", () =>
         tribe = engine.Tribe,
         hero = engine.Hero,
         scan = engine.Scan,
+        account = engine.Account,
+        events = engine.Events(),
         catapultSetup = engine.CatapultSetup,
         farmLists = engine.FarmLists,
         villages = engine.Villages(active),
         jobs = engine.Jobs(),
         settings = active.Length == 0 ? new MacSettings() : settings.Load(active),
         defaults = MacDefaults.Options,
+        templates = templates.Load(),
     });
 });
 
 app.MapGet("/api/logs", (long after) => Results.Json(log.ReadAfter(after)));
+
+app.MapGet("/api/agent/summary", () => Results.Json(BuildSummary()));
+
+app.MapGet("/api/agent/guide", () => Results.Text(MacPaths.ReadEmbeddedText("TbotUltra.Mac.Agent.guide.md"), "text/markdown; charset=utf-8"));
+
+// Replaces a village's whole build queue in one call: the natural shape for a planning agent.
+app.MapPut("/api/villages/{key}/build", (string key, QueueReplacement request) =>
+{
+    var items = request.Items ?? [];
+    var allowed = new[] { "resources_all", "resource_field", "building_upgrade", "building_max", "building_construct", "building_demolish" };
+    foreach (var item in items)
+    {
+        if (!allowed.Contains(item.Type))
+        {
+            throw new InvalidOperationException($"Unknown build item type '{item.Type}'. Use one of: {string.Join(", ", allowed)}.");
+        }
+
+        if (item.Type != "resources_all" && item.SlotId is null)
+        {
+            throw new InvalidOperationException($"Build item '{item.Type}' needs slotId.");
+        }
+
+        if (item.Type == "building_construct" && item.Gid is null)
+        {
+            throw new InvalidOperationException("building_construct needs gid (see GET /api/catalog).");
+        }
+    }
+
+    var account = RequireAccount();
+    var village = RequireVillageView(account, key);
+    var notes = new List<string>();
+    var queued = new List<BuildItem>();
+    settings.Update(account, current =>
+    {
+        foreach (var item in items)
+        {
+            item.Id = Guid.NewGuid().ToString("N")[..10];
+            item.Status = "pending";
+            item.Note = string.Empty;
+            item.StallCount = 0;
+            item.TargetLevel = Math.Clamp(item.TargetLevel, 0, 100);
+            if (string.IsNullOrWhiteSpace(item.Name))
+            {
+                item.Name = item.Gid is int gid
+                    ? BuildingCatalogService.NameForGid(gid)
+                    : village.Buildings.FirstOrDefault(building => building.SlotId == item.SlotId)?.Name
+                      ?? village.Fields.FirstOrDefault(field => field.SlotId == item.SlotId)?.Name
+                      ?? "Resource fields";
+            }
+
+            if (request.Preflight ?? StoragePreflightEnabled(current))
+            {
+                var plan = BuildPlanner.PlanStorage(village, queued, item);
+                queued.AddRange(plan.Items);
+                notes.AddRange(plan.Notes);
+            }
+
+            queued.Add(item);
+        }
+
+        RequireVillage(current, key).BuildQueue = queued;
+    });
+    engine.RunJobNow($"build:{key}");
+    return Results.Json(new { queue = queued, notes });
+});
 
 app.MapGet("/api/catalog", (string? tribe) =>
 {
@@ -287,8 +364,83 @@ app.MapPost("/api/villages/{key}/build", (string key, BuildItem item) =>
     item.Note = string.Empty;
     item.StallCount = 0;
     item.TargetLevel = Math.Clamp(item.TargetLevel, 0, 100);
-    settings.Update(RequireAccount(), current => RequireVillage(current, key).BuildQueue.Add(item));
-    return Results.Json(new { item.Id });
+    var account = RequireAccount();
+    var village = RequireVillageView(account, key);
+    var notes = new List<string>();
+    settings.Update(account, current =>
+    {
+        var queue = RequireVillage(current, key).BuildQueue;
+        if (StoragePreflightEnabled(current))
+        {
+            // Storage that is too small would leave the item waiting forever, so queue the upgrade first.
+            var plan = BuildPlanner.PlanStorage(village, queue, item);
+            queue.AddRange(plan.Items);
+            notes.AddRange(plan.Notes);
+        }
+
+        queue.Add(item);
+    });
+    return Results.Json(new { item.Id, notes });
+});
+
+app.MapPut("/api/templates", (BuildTemplate template) =>
+{
+    template.Id = string.IsNullOrWhiteSpace(template.Id) ? Guid.NewGuid().ToString("N")[..10] : template.Id;
+    return Results.Json(templates.Save(template));
+});
+
+app.MapDelete("/api/templates/{id}", (string id) =>
+{
+    templates.Delete(id);
+    return Results.Ok();
+});
+
+app.MapPost("/api/villages/{key}/template/{id}", (string key, string id) =>
+{
+    var template = templates.Load().FirstOrDefault(item => item.Id == id)
+        ?? throw new InvalidOperationException("That template no longer exists.");
+    var account = RequireAccount();
+    var village = RequireVillageView(account, key);
+    PlanResult? plan = null;
+    settings.Update(account, current =>
+    {
+        var queue = RequireVillage(current, key).BuildQueue;
+        plan = BuildPlanner.PlanTemplate(template, village, queue, engine.Tribe);
+        queue.AddRange(plan.Items);
+    });
+    engine.RunJobNow($"build:{key}");
+    return Results.Json(new { added = plan!.Items.Count, notes = plan.Notes });
+});
+
+app.MapPost("/api/villages/{key}/template-from-queue", (string key, TemplateName request) =>
+{
+    var account = RequireAccount();
+    var village = RequireVillageView(account, key);
+    var queue = RequireVillage(settings.Load(account), key).BuildQueue;
+    var steps = new List<TemplateStep>();
+    foreach (var item in queue)
+    {
+        if (item.Type == "resources_all")
+        {
+            steps.Add(new TemplateStep { Kind = "resources", Name = "Resource fields", TargetLevel = item.TargetLevel, ResourceTypes = item.ResourceTypes });
+        }
+        else if (item.Type is "building_upgrade" or "building_max" or "building_construct")
+        {
+            var gid = item.Gid ?? village.Buildings.FirstOrDefault(building => building.SlotId == item.SlotId)?.Gid;
+            if (gid is int value)
+            {
+                var level = item.Type == "building_max" ? BuildingCatalogService.MaxLevelFor(value) : item.TargetLevel;
+                steps.Add(new TemplateStep { Kind = "building", Gid = value, Name = BuildingCatalogService.NameForGid(value), TargetLevel = level });
+            }
+        }
+    }
+
+    if (steps.Count == 0)
+    {
+        throw new InvalidOperationException("The build queue has nothing a template can hold. Add some items first.");
+    }
+
+    return Results.Json(templates.Save(new BuildTemplate { Name = request.Name, Steps = steps }));
 });
 
 app.MapPost("/api/villages/{key}/build/{id}/{action}", (string key, string id, string action) =>
@@ -350,6 +502,9 @@ app.Lifetime.ApplicationStopping.Register(() =>
 
 await app.StartAsync();
 var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
+var agentFiles = new AgentFiles(root, address, token, () => BuildSummary());
+agentFiles.Start();
+app.Lifetime.ApplicationStopping.Register(agentFiles.Stop);
 log.Add($"[mac] Tbot Ultra for macOS {ReadVersion()} — data folder: {root}");
 
 _ = Task.Run(async () =>
@@ -373,6 +528,75 @@ if (args.Contains("--open"))
 
 await app.WaitForShutdownAsync();
 
+object BuildSummary()
+{
+    var active = accounts.ActiveAccountName();
+    var account = accounts.Find(active);
+    var current = active.Length == 0 ? new MacSettings() : settings.Load(active);
+    var now = DateTimeOffset.UtcNow;
+    return new
+    {
+        generatedAtUtc = now,
+        status = new
+        {
+            loggedIn = engine.LoggedIn,
+            running = engine.Running,
+            sleepingUntilUtc = engine.SleepingUntilUtc,
+            busy = engine.Busy,
+            activity = engine.Activity,
+            alert = engine.Alert,
+            prompt = engine.Prompt,
+        },
+        account = new
+        {
+            name = active,
+            server = account?.ServerUrl,
+            world = account?.ServerName,
+            tribe = engine.Tribe,
+            gold = engine.Account?.Gold,
+            silver = engine.Account?.Silver,
+            unreadMessages = engine.Account?.UnreadMessages,
+            unreadReports = engine.Account?.UnreadReports,
+        },
+        hero = engine.Hero,
+        features = current.Features,
+        villages = engine.Villages(active).Select(village =>
+        {
+            current.Villages.TryGetValue(village.Key, out var villageSettings);
+            return new
+            {
+                village.Key,
+                village.Name,
+                village.X,
+                village.Y,
+                village.IsCapital,
+                village.Population,
+                automated = villageSettings?.Enabled ?? true,
+                village.UpdatedUtc,
+                stock = village.Stock,
+                warehouseCapacity = village.Warehouse,
+                granaryCapacity = village.Granary,
+                fields = village.Fields,
+                buildings = village.Buildings.Where(building => !string.Equals(building.Name, "Empty", StringComparison.OrdinalIgnoreCase)),
+                emptySlots = village.Buildings.Where(building => string.Equals(building.Name, "Empty", StringComparison.OrdinalIgnoreCase)).Select(building => building.SlotId),
+                underConstruction = village.Constructions.Where(item => item.FinishUtc is null || item.FinishUtc > now),
+                training = village.Training,
+                buildQueue = villageSettings?.BuildQueue ?? [],
+                troopRules = villageSettings?.Troops ?? [],
+            };
+        }),
+        farming = new
+        {
+            lists = engine.FarmLists,
+            selectedLists = current.FarmListNames,
+            raidsOut = current.FarmRaids.BusyUntilUtc.Where(pair => pair.Value > now).ToDictionary(pair => pair.Key, pair => pair.Value),
+            onHold = current.FarmRaids.OnHold,
+        },
+        jobs = engine.Jobs(),
+        recentEvents = engine.Events(),
+    };
+}
+
 IResult Fire(Func<Task> action)
 {
     _ = Task.Run(async () =>
@@ -394,6 +618,16 @@ string RequireAccount()
     var name = accounts.ActiveAccountName();
     return name.Length > 0 ? name : throw new InvalidOperationException("Add an account first.");
 }
+
+VillageView RequireVillageView(string account, string key)
+    => engine.Villages(account).FirstOrDefault(village => village.Key == key)
+        ?? throw new InvalidOperationException("Unknown village. Log in or scan villages first.");
+
+static bool StoragePreflightEnabled(MacSettings current)
+    => string.Equals(
+        current.Options.GetValueOrDefault("mac_storage_preflight") ?? MacDefaults.Options["mac_storage_preflight"],
+        "true",
+        StringComparison.OrdinalIgnoreCase);
 
 void RequireStopped()
 {
@@ -428,6 +662,10 @@ static string ReadVersion()
 internal sealed record PromptAnswer(string Id, string? Value);
 
 internal sealed record JobRequest(string Key);
+
+internal sealed record TemplateName(string Name);
+
+internal sealed record QueueReplacement(List<BuildItem>? Items, bool? Preflight);
 
 internal sealed record FarmTargetKey(string Key);
 

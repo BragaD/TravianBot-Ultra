@@ -1,0 +1,44 @@
+#!/bin/bash
+# tbot — talk to a running Tbot Ultra from a terminal or an AI agent.
+#
+#   tbot summary                          compact state (same as: tbot get /api/agent/summary)
+#   tbot guide                            print the agent guide
+#   tbot get  <path>                      GET  an API path, e.g. /api/catalog
+#   tbot post <path> [json]               POST, e.g. tbot post /api/start
+#   tbot put  <path> <json>               PUT
+#   tbot delete <path>                    DELETE
+#
+# Set TBOT_AGENT to a short name so your changes are labelled in the app's log.
+set -euo pipefail
+
+ROOT="${TBOT_ROOT:-$HOME/Library/Application Support/TbotUltra}"
+CONNECTION="$ROOT/agent/connection.json"
+if [ ! -f "$CONNECTION" ]; then
+  echo "Tbot Ultra is not running (no $CONNECTION)." >&2
+  exit 2
+fi
+
+read_field() { /usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$CONNECTION" "$1"; }
+URL="$(read_field url)"
+TOKEN="$(read_field token)"
+AGENT="${TBOT_AGENT:-agent}"
+
+command="${1:-summary}"
+case "$command" in
+  summary) method=GET; path=/api/agent/summary; body="" ;;
+  guide)   method=GET; path=/api/agent/guide; body="" ;;
+  get|post|put|delete)
+    method="$(printf '%s' "$command" | tr '[:lower:]' '[:upper:]')"
+    path="${2:?usage: tbot $command <path> [json]}"
+    body="${3:-}"
+    ;;
+  *) sed -n '2,12p' "$0" >&2; exit 64 ;;
+esac
+
+args=(--silent --show-error --fail-with-body -X "$method" -H "X-Tbot-Token: $TOKEN" -H "X-Tbot-Agent: $AGENT")
+if [ -n "$body" ]; then
+  args+=(-H "Content-Type: application/json" --data "$body")
+fi
+
+curl "${args[@]}" "$URL$path"
+echo

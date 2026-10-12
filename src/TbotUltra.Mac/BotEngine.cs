@@ -15,6 +15,10 @@ public sealed record BuildingView(int? SlotId, string Name, int? Level, int? Gid
 
 public sealed record ConstructionView(string Name, int? Level, DateTimeOffset? FinishUtc);
 
+public sealed record StockView(string Resource, long? Current, long? Capacity, double? PerHour, DateTimeOffset? FullAtUtc);
+
+public sealed record TrainingView(string Building, int QueuedBatches, DateTimeOffset? FinishUtc);
+
 public sealed record VillageView(
     string Key,
     string Name,
@@ -29,7 +33,14 @@ public sealed record VillageView(
     List<FieldView> Fields,
     List<BuildingView> Buildings,
     List<ConstructionView> Constructions,
-    DateTimeOffset? UpdatedUtc);
+    DateTimeOffset? UpdatedUtc,
+    List<StockView>? Stock = null,
+    List<TrainingView>? Training = null,
+    int? Population = null);
+
+public sealed record AccountView(int? Gold, int? Silver, int UnreadMessages, int UnreadReports, DateTimeOffset UpdatedUtc);
+
+public sealed record EventView(DateTimeOffset At, string Title, string Result);
 
 public sealed record FarmListView(string Name, string? ListId, string? Village, int Active, int Total);
 
@@ -88,6 +99,8 @@ public sealed class BotEngine
     private CancellationTokenSource? _loopCancellation;
     private Task? _loopTask;
     private CancellationTokenSource? _manualCancellation;
+    private readonly LinkedList<EventView> _events = new();
+    private AccountView? _account;
     private DateTimeOffset? _sleepUntilUtc;
     private volatile bool _wakeRequested;
     private ScanView? _scan;
@@ -145,6 +158,16 @@ public sealed class BotEngine
     public HeroView? Hero => _hero;
 
     public ScanView? Scan => _scan;
+
+    public AccountView? Account => _account;
+
+    public IReadOnlyList<EventView> Events()
+    {
+        lock (_sync)
+        {
+            return _events.ToList();
+        }
+    }
 
     public CatapultSetupView? CatapultSetup => _catapultSetup;
 
@@ -784,6 +807,12 @@ public sealed class BotEngine
 
     private async Task ExecuteJobAsync(AccountEntry account, MacSettings settings, Job job, CancellationToken cancellationToken)
     {
+        await ExecuteJobCoreAsync(account, settings, job, cancellationToken);
+        RecordEvent(job.Title, _lastResult.GetValueOrDefault(job.Key, string.Empty));
+    }
+
+    private async Task ExecuteJobCoreAsync(AccountEntry account, MacSettings settings, Job job, CancellationToken cancellationToken)
+    {
         var options = BotOptionsPayloadApplier.Apply(BuildOptions(account, settings), job.Payload);
         try
         {
@@ -1252,10 +1281,43 @@ public sealed class BotEngine
 
     private void Schedule(string key, TimeSpan delay, string result)
     {
+        if (key == "hero")
+        {
+            // The hero job's result carries the freshest HP and adventure count the engine read.
+            var hp = Regex.Match(result, @"\bhp=(\d+)%");
+            var adventures = Regex.Match(result, @"\badventures=(\d+)");
+            if (hp.Success || adventures.Success)
+            {
+                var current = _hero ?? new HeroView("Unknown", null, 0, null, DateTimeOffset.UtcNow);
+                _hero = current with
+                {
+                    State = result.Contains("dead=True", StringComparison.OrdinalIgnoreCase) ? "Dead"
+                        : result.Contains("in_village=False", StringComparison.OrdinalIgnoreCase) || result.Contains("adventure_sent", StringComparison.OrdinalIgnoreCase) ? "Away"
+                        : "Home",
+                    Hp = hp.Success ? int.Parse(hp.Groups[1].Value, CultureInfo.InvariantCulture) : current.Hp,
+                    Adventures = adventures.Success ? int.Parse(adventures.Groups[1].Value, CultureInfo.InvariantCulture) : current.Adventures,
+                    UpdatedUtc = DateTimeOffset.UtcNow,
+                };
+            }
+        }
+
         lock (_sync)
         {
             _due[key] = DateTimeOffset.UtcNow + delay;
             _lastResult[key] = Shorten(result);
+        }
+    }
+
+    // Keeps the last finished pieces of work for the dashboard and for agents reading the summary.
+    private void RecordEvent(string title, string result)
+    {
+        lock (_sync)
+        {
+            _events.AddFirst(new EventView(DateTimeOffset.UtcNow, title, Shorten(result)));
+            while (_events.Count > 40)
+            {
+                _events.RemoveLast();
+            }
         }
     }
 
@@ -1408,6 +1470,21 @@ public sealed class BotEngine
                     Constructions = (status.ActiveConstructions ?? [])
                         .Select(item => new ConstructionView(item.Name, item.Level, item.Finish?.FinishUtc))
                         .ToList(),
+                    Stock = status.ResourceStorageForecasts is { Count: > 0 } forecasts
+                        ? forecasts.Select(item => new StockView(
+                            item.ResourceKey,
+                            item.Current,
+                            item.Capacity,
+                            item.ProductionPerHour,
+                            item.SecondsToFull is > 0 ? DateTimeOffset.UtcNow.AddSeconds(item.SecondsToFull.Value) : null)).ToList()
+                        : active.Stock,
+                    Training = status.TroopTrainingQueues is { } queues
+                        ? queues.Where(queue => queue.Exists && queue.QueueItems.Count > 0)
+                            .Select(queue => new TrainingView(queue.BuildingName, queue.QueueItems.Count, queue.Finish?.FinishUtc))
+                            .ToList()
+                        : active.Training,
+                    Population = status.Villages.FirstOrDefault(item => string.Equals(item.Name, active.Name, StringComparison.OrdinalIgnoreCase))?.Population
+                        ?? active.Population,
                     UpdatedUtc = DateTimeOffset.UtcNow,
                 };
             }
@@ -1416,6 +1493,15 @@ public sealed class BotEngine
         }
 
         ApplyHero(status.HeroStatus, status.AdventureCount, inventory: null);
+        if (status.Gold is not null || status.Silver is not null || status.UnreadMessages > 0 || status.UnreadReports > 0)
+        {
+            _account = new AccountView(
+                status.Gold ?? _account?.Gold,
+                status.Silver ?? _account?.Silver,
+                status.UnreadMessages,
+                status.UnreadReports,
+                DateTimeOffset.UtcNow);
+        }
 
         // Every known village gets a settings entry so its build queue and troop rules can be edited.
         _settings.Update(accountName, settings =>
