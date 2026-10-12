@@ -100,6 +100,7 @@ app.MapGet("/api/state", () =>
         scan = engine.Scan,
         account = engine.Account,
         events = engine.Events(),
+        attacks = engine.Attacks(),
         catapultSetup = engine.CatapultSetup,
         farmLists = engine.FarmLists,
         villages = engine.Villages(active),
@@ -270,6 +271,12 @@ app.MapPost("/api/start", () =>
 });
 
 app.MapPost("/api/stop", () => Fire(engine.StopAsync));
+
+app.MapPost("/api/notify/test", () =>
+{
+    engine.TestNotification();
+    return Results.Ok();
+});
 
 app.MapPost("/api/wake", () =>
 {
@@ -592,6 +599,7 @@ object BuildSummary()
             raidsOut = current.FarmRaids.BusyUntilUtc.Where(pair => pair.Value > now).ToDictionary(pair => pair.Key, pair => pair.Value),
             onHold = current.FarmRaids.OnHold,
         },
+        incomingAttacks = engine.Attacks(),
         jobs = engine.Jobs(),
         recentEvents = engine.Events(),
     };

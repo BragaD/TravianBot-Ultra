@@ -107,6 +107,9 @@ change anything this way; changes need the HTTP API.
                "selectedLists": ["Farms 1"],
                "raidsOut": { "89|81": "2026-10-11T20:39:10Z" },
                "onHold":  { "92|85": { "reason": "Last raid had losses", "sinceUtc": "…" } } },
+  "incomingAttacks": [{ "id": "…", "villageKey": "xy:95|80", "villageName": "Alpha",
+                        "arrivalUtc": "…", "type": "Raid", "fromPlayer": "…",
+                        "fromVillage": "…", "fromX": 90, "fromY": 77 }],   // soonest first
   "jobs": [{ "key": "hero", "title": "Hero: adventures", "dueUtc": "…", "lastResult": "…" }],
   "recentEvents": [{ "at": "…", "title": "Train troops in Alpha", "result": "…" }]
 }
@@ -232,6 +235,7 @@ need and send all of it back.
 | `resourceTransfer`, `reinforcements` | Sending between own villages. |
 | `productionBonus` | Watching the +15% production videos. |
 | `markRead` | Marking messages and reports as read. |
+| `attackWatch` | Checking each village's Rally Point for incoming attacks every few minutes. |
 
 ### Options
 
@@ -259,6 +263,11 @@ Current values are `settings.options` in `GET /api/state`; anything not listed t
 | `mac_pacing_run_min_minutes` / `_max_minutes`, `mac_pacing_sleep_min_minutes` / `_max_minutes` | minutes | Length of play and rest. |
 | `mac_active_from_hour`, `mac_active_to_hour` | `0`–`24` | Hours of the day the bot may play (`0`/`24` = always). |
 | `construct_faster_enabled`, `increase_adventures_to_hard`, `reduce_adventure_time` | `true`/`false` | Bonus videos. |
+| `hero_ointment_target_hp_percent` | `50`–`100` in tens | Heal the hero with ointments up to this HP (needs `hero_auto_use_ointments`). |
+| `mac_attack_notify` | `true`/`false` | macOS notification when a new attack is seen. |
+| `mac_attack_spend_enabled`, `mac_attack_spend_lead_minutes` | `true`/`false`, minutes | Run the village's build and training jobs this long before a hit, so less can be plundered. |
+| `mac_evasion_enabled`, `mac_evasion_target`, `mac_evasion_lead_minutes`, `mac_evasion_include_hero` | `true`/`false`, `"x\|y"`, minutes, `true`/`false` | Shortly before a hit, send all troops on a raid to the target, timed to return after it. **Sends an attack**: see section 9. |
+| `mac_overflow_guard_enabled`, `mac_overflow_threshold_percent` | `true`/`false`, `50`–`100` | When a resource reaches this share of storage: train troops, and queue one field upgrade if no build item is pending. |
 | `npc_trade_enabled`, `npc_trade_construction_enabled`, `allow_gold_spending`, `gold_limit`, `daily_gold_spending_limit` | see section 9 | NPC trade. **Spends gold.** |
 
 ### Per-village settings
@@ -323,7 +332,8 @@ only answer `ok` if they confirm they did), `confirm` (send prepared attack wave
    `POST /api/login`, wait for `busy` to clear, then `POST /api/start`.
 6. For each village: if `buildQueue` is empty or has `blocked` items, plan and `PUT` a new queue.
    If a `stock` entry is near `capacity` with nothing queued to spend it, queue something.
-7. Check `recentEvents` for repeated failures of the same job.
+7. If `incomingAttacks` is not empty, tell the user; do not change evasion settings yourself.
+   Check `recentEvents` for repeated failures of the same job.
 8. Wait. Polling the summary once a minute is plenty; the bot's own jobs run on timers of minutes.
 
 Do not poll faster than every few seconds, and do not call `POST /api/scan` in a loop: each scan
@@ -335,7 +345,8 @@ These cost something real or act on other players. Do them only when the user ha
 
 - **Spending gold**: turning on `allow_gold_spending`, `npc_trade_enabled` or
   `npc_trade_construction_enabled`, or lowering `gold_limit`.
-- **Attacks**: `POST /api/catapults/send`, adding farm targets, creating farm lists, releasing a
+- **Attacks**: turning on `mac_evasion_enabled` or changing `mac_evasion_target`,
+  `POST /api/catapults/send`, adding farm targets, creating farm lists, releasing a
   target that is on hold after losses, answering a `confirm` prompt.
 - **Demolition**: `building_demolish` items.
 - **Accounts**: `POST /api/accounts`, `DELETE /api/accounts/{name}`. Never read or write the `.env`

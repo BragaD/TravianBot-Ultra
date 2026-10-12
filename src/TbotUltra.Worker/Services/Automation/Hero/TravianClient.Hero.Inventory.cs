@@ -78,6 +78,19 @@ public sealed partial class TravianClient
         await GotoAsync(Paths.HeroInventory, cancellationToken);
         await WaitForPageReadyAsync(cancellationToken); // Wait for page to load
 
+        // The inventory is React-rendered. Reading before its items exist reports "no ointments" and
+        // starts the long empty-inventory cooldown, so wait for the item list first.
+        try
+        {
+            await _page.WaitForSelectorAsync(
+                ".heroItems .heroItem",
+                new Microsoft.Playwright.PageWaitForSelectorOptions { Timeout = 6000 }).WaitAsync(cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            Notify("[hero-ointment] inventory items did not render within 6 seconds; reading what is there.");
+        }
+
         var info = await ReadHeroOintmentInventoryInfoAsync(cancellationToken);
         if (!info.Found || info.Count <= 0)
         {

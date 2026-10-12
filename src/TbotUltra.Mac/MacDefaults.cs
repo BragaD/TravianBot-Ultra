@@ -60,6 +60,20 @@ public static class MacDefaults
 
         ["mac_storage_preflight"] = "true",
 
+        // Under attack: what to do shortly before a hit lands.
+        ["mac_attack_notify"] = "true",
+        ["mac_attack_spend_enabled"] = "true",
+        ["mac_attack_spend_lead_minutes"] = "15",
+        ["mac_evasion_enabled"] = "false",
+        ["mac_evasion_target"] = "",
+        ["mac_evasion_include_hero"] = "true",
+        ["mac_evasion_lead_minutes"] = "6",
+
+        // Overflow guard: spend resources before storage caps.
+        ["mac_overflow_guard_enabled"] = "true",
+        ["mac_overflow_threshold_percent"] = "90",
+        ["hero_ointment_target_hp_percent"] = "100",
+
         // Session pacing is the Mac loop's own: play for a while, close the browser, come back later.
         ["mac_pacing_enabled"] = "true",
         ["mac_pacing_run_min_minutes"] = "60",

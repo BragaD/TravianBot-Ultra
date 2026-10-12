@@ -42,6 +42,17 @@ public sealed record AccountView(int? Gold, int? Silver, int UnreadMessages, int
 
 public sealed record EventView(DateTimeOffset At, string Title, string Result);
 
+public sealed record AttackView(
+    string Id,
+    string VillageKey,
+    string VillageName,
+    DateTimeOffset ArrivalUtc,
+    string Type,
+    string? FromPlayer,
+    string? FromVillage,
+    int? FromX,
+    int? FromY);
+
 public sealed record FarmListView(string Name, string? ListId, string? Village, int Active, int Total);
 
 public sealed record HeroView(string State, int? Hp, int Adventures, HeroInventoryResources? Inventory, DateTimeOffset UpdatedUtc);
@@ -77,8 +88,9 @@ public sealed class BotEngine
 {
     private static readonly TimeSpan MaxDeferral = TimeSpan.FromHours(6);
 
-    // Not an engine task: the loop runs the two inbox calls itself.
+    // Not engine tasks: the loop runs these itself.
     private const string MarkReadTask = "mark_inbox_read";
+    private const string AttackWatchTask = "watch_incoming_attacks";
 
     private readonly object _sync = new();
     private readonly string _root;
@@ -100,6 +112,11 @@ public sealed class BotEngine
     private Task? _loopTask;
     private CancellationTokenSource? _manualCancellation;
     private readonly LinkedList<EventView> _events = new();
+    private readonly Dictionary<string, List<AttackView>> _attacks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _announcedAttacks = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _spentForAttacks = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _evadedAttacks = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, DateTimeOffset> _overflowActedAt = new(StringComparer.OrdinalIgnoreCase);
     private AccountView? _account;
     private DateTimeOffset? _sleepUntilUtc;
     private volatile bool _wakeRequested;
@@ -160,6 +177,18 @@ public sealed class BotEngine
     public ScanView? Scan => _scan;
 
     public AccountView? Account => _account;
+
+    /// <summary>Incoming attacks that have not landed yet, soonest first.</summary>
+    public IReadOnlyList<AttackView> Attacks()
+    {
+        lock (_sync)
+        {
+            return _attacks.Values.SelectMany(list => list)
+                .Where(attack => attack.ArrivalUtc > DateTimeOffset.UtcNow)
+                .OrderBy(attack => attack.ArrivalUtc)
+                .ToList();
+        }
+    }
 
     public IReadOnlyList<EventView> Events()
     {
@@ -655,6 +684,8 @@ public sealed class BotEngine
                     continue;
                 }
 
+                await RespondToAttacksAsync(account, settings, cancellationToken);
+                GuardAgainstOverflow(account.Name, settings);
                 var jobs = BuildJobs(settings, account.Name);
                 var now = DateTimeOffset.UtcNow;
                 Job? next;
@@ -706,6 +737,216 @@ public sealed class BotEngine
         finally
         {
             Activity = LoggedIn ? "Logged in — automation stopped" : "Not logged in";
+        }
+    }
+
+    // ----- Incoming attacks ------------------------------------------------------------------------
+
+    private static bool OptionOn(MacSettings settings, string key)
+        => string.Equals(PacingValue(settings, key), "true", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<DateTimeOffset?> WatchIncomingAttacksAsync(AccountEntry account, MacSettings settings, BotOptions options, CancellationToken cancellationToken)
+    {
+        foreach (var village in Villages(account.Name))
+        {
+            if (settings.Villages.TryGetValue(village.Key, out var villageSettings) && !villageSettings.Enabled)
+            {
+                continue;
+            }
+
+            var coordinateKey = village.X.HasValue && village.Y.HasValue ? $"xy:{village.X}|{village.Y}" : null;
+            var snapshot = await _runner.ReadIncomingAttacksAsync(options, Log, village.Name, village.Url, coordinateKey, cancellationToken: cancellationToken);
+            var attacks = snapshot.Attacks
+                .Where(attack => attack.ArrivalAtUtc > DateTimeOffset.UtcNow)
+                .Select(attack => new AttackView(
+                    attack.Id,
+                    village.Key,
+                    village.Name,
+                    attack.ArrivalAtUtc,
+                    attack.MovementType.ToString(),
+                    attack.SourcePlayerName,
+                    attack.SourceVillageName,
+                    attack.SourceCoordX,
+                    attack.SourceCoordY))
+                .ToList();
+            List<AttackView> fresh;
+            lock (_sync)
+            {
+                _attacks[village.Key] = attacks;
+                fresh = attacks.Where(attack => _announcedAttacks.Add(attack.Id)).ToList();
+            }
+
+            foreach (var attack in fresh)
+            {
+                var from = string.IsNullOrWhiteSpace(attack.FromPlayer) ? "an unknown player" : attack.FromPlayer;
+                var text = $"{attack.Type} on {village.Name} from {from} lands at {attack.ArrivalUtc.ToLocalTime():HH:mm:ss}.";
+                Log($"[mac] INCOMING ATTACK: {text}");
+                Alert = $"Incoming attack: {text}";
+                RecordEvent("Incoming attack", text);
+                if (OptionOn(settings, "mac_attack_notify"))
+                {
+                    Notify("Tbot Ultra — incoming attack", text);
+                }
+            }
+        }
+
+        return Attacks().FirstOrDefault()?.ArrivalUtc;
+    }
+
+    // Shortly before a hit: spend what would be plundered, then move the troops out of the way.
+    private async Task RespondToAttacksAsync(AccountEntry account, MacSettings settings, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var attack in Attacks())
+        {
+            var untilHit = attack.ArrivalUtc - now;
+            if (OptionOn(settings, "mac_attack_spend_enabled")
+                && untilHit <= TimeSpan.FromMinutes(PacingMinutes(settings, "mac_attack_spend_lead_minutes"))
+                && _spentForAttacks.Add(attack.Id))
+            {
+                Log($"[mac] attack on {attack.VillageName} lands in {untilHit.TotalMinutes:F0} min; spending resources first.");
+                RunJobNow($"build:{attack.VillageKey}");
+                RunJobNow($"troops:{attack.VillageKey}");
+            }
+
+            if (!OptionOn(settings, "mac_evasion_enabled")
+                || untilHit > TimeSpan.FromMinutes(PacingMinutes(settings, "mac_evasion_lead_minutes"))
+                || untilHit < TimeSpan.FromSeconds(25)
+                || !_evadedAttacks.Add(attack.Id))
+            {
+                continue;
+            }
+
+            var target = Regex.Match(PacingValue(settings, "mac_evasion_target"), @"(-?\d+)\s*[|,/]\s*(-?\d+)");
+            VillageView? village;
+            lock (_sync)
+            {
+                _villages.TryGetValue(attack.VillageKey, out village);
+            }
+
+            if (!target.Success || village is null)
+            {
+                Alert = "Troop evasion is on but has no target. Set evasion coordinates in Settings → Under attack.";
+                Log($"[mac] {Alert}");
+                continue;
+            }
+
+            Activity = $"Running — moving troops out of {attack.VillageName}";
+            try
+            {
+                var result = await _runner.SendTroopEvasionAsync(
+                    BuildOptions(account, settings),
+                    new TroopEvasionRequest(
+                        village.Name,
+                        village.Url,
+                        village.X.HasValue && village.Y.HasValue ? $"xy:{village.X}|{village.Y}" : village.Key,
+                        int.Parse(target.Groups[1].Value, CultureInfo.InvariantCulture),
+                        int.Parse(target.Groups[2].Value, CultureInfo.InvariantCulture),
+                        TroopEvasionMovementType.Raid,
+                        Enumerable.Range(1, 10).ToList(),
+                        OptionOn(settings, "mac_evasion_include_hero"),
+                        attack.ArrivalUtc,
+                        TimeSpan.FromSeconds(30)),
+                    Log,
+                    cancellationToken: cancellationToken);
+                Log($"[mac] troop evasion for {attack.VillageName}: {result.Outcome} — {result.Message}");
+                RecordEvent($"Troop evasion in {attack.VillageName}", $"{result.Outcome}: {result.Message}");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log($"[mac] troop evasion for {attack.VillageName} failed: {ex.Message}");
+                RecordEvent($"Troop evasion in {attack.VillageName}", $"Failed: {ex.Message}");
+            }
+        }
+    }
+
+    private void Notify(string title, string text)
+    {
+        try
+        {
+            static string Quote(string value) => value.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("/usr/bin/osascript")
+            {
+                ArgumentList = { "-e", $"display notification \"{Quote(text)}\" with title \"{Quote(title)}\" sound name \"Basso\"" },
+                UseShellExecute = false,
+            });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            Log($"[mac] could not show a notification: {ex.Message}");
+        }
+    }
+
+    public void TestNotification() => Notify("Tbot Ultra", "Notifications are working.");
+
+    // ----- Overflow guard ---------------------------------------------------------------------------
+
+    // When a resource is about to hit its storage cap, production is wasted: train troops if the
+    // village has training rules, and if nothing is queued to build, queue the cheapest field upgrade.
+    private void GuardAgainstOverflow(string accountName, MacSettings settings)
+    {
+        if (!OptionOn(settings, "mac_overflow_guard_enabled"))
+        {
+            return;
+        }
+
+        var threshold = Math.Clamp(PacingMinutes(settings, "mac_overflow_threshold_percent"), 50, 100) / 100d;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var village in Villages(accountName))
+        {
+            if (village.Stock is not { Count: > 0 } stock || village.UpdatedUtc is not { } readAt
+                || !settings.Villages.TryGetValue(village.Key, out var villageSettings) || !villageSettings.Enabled
+                || (_overflowActedAt.TryGetValue(village.Key, out var actedAt) && now - actedAt < TimeSpan.FromMinutes(15)))
+            {
+                continue;
+            }
+
+            var hours = Math.Max(0, (now - readAt).TotalHours);
+            var fullest = stock
+                .Where(item => item.Current is not null && item.Capacity is > 0)
+                .Select(item => (item.Resource, Ratio: Math.Min(1d, (item.Current!.Value + ((item.PerHour ?? 0) * hours)) / item.Capacity!.Value)))
+                .OrderByDescending(item => item.Ratio)
+                .FirstOrDefault();
+            if (fullest.Resource is null || fullest.Ratio < threshold)
+            {
+                continue;
+            }
+
+            _overflowActedAt[village.Key] = now;
+            var actions = new List<string>();
+            if (settings.Features.Troops && villageSettings.Troops.Any(pair =>
+                    pair.Key.EndsWith("_enabled", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(pair.Value, "true", StringComparison.OrdinalIgnoreCase)))
+            {
+                RunJobNow($"troops:{village.Key}");
+                actions.Add("training troops now");
+            }
+
+            var maxFieldLevel = village.IsCapital == true ? 20 : 10;
+            var field = village.Fields.Where(item => item.SlotId is not null && (item.Level ?? 0) < maxFieldLevel).OrderBy(item => item.Level ?? 0).FirstOrDefault();
+            if (settings.Features.Construction && field is not null && !villageSettings.BuildQueue.Any(item => item.Status == "pending"))
+            {
+                _settings.Update(accountName, current =>
+                {
+                    if (current.Villages.TryGetValue(village.Key, out var entry) && !entry.BuildQueue.Any(item => item.Status == "pending"))
+                    {
+                        entry.BuildQueue.Add(new BuildItem
+                        {
+                            Type = "resource_field",
+                            SlotId = field.SlotId,
+                            Name = field.Name,
+                            TargetLevel = (field.Level ?? 0) + 1,
+                            Note = $"Added automatically: {fullest.Resource} storage is {fullest.Ratio:P0} full.",
+                        });
+                    }
+                });
+                RunJobNow($"build:{village.Key}");
+                actions.Add($"queued {field.Name} to level {(field.Level ?? 0) + 1}");
+            }
+
+            var summary = actions.Count > 0 ? string.Join(" and ", actions) : "nothing to spend on — add items to the build queue";
+            Log($"[mac] {village.Name}: {fullest.Resource} storage is about {fullest.Ratio:P0} full; {summary}.");
+            RecordEvent($"Storage almost full in {village.Name}", $"{fullest.Resource} at {fullest.Ratio:P0}: {summary}.");
         }
     }
 
@@ -816,6 +1057,19 @@ public sealed class BotEngine
         var options = BotOptionsPayloadApplier.Apply(BuildOptions(account, settings), job.Payload);
         try
         {
+            if (job.Task == AttackWatchTask)
+            {
+                var soonest = await WatchIncomingAttacksAsync(account, settings, options, cancellationToken);
+                var attacks = Attacks();
+
+                // Look again soon while something is on its way; otherwise at the normal pace.
+                var next = soonest is { } arrival && arrival - DateTimeOffset.UtcNow < TimeSpan.FromMinutes(30)
+                    ? TimeSpan.FromSeconds(Random.Shared.Next(90, 150))
+                    : job.SuccessInterval();
+                Schedule(job.Key, next, attacks.Count == 0 ? "No incoming attacks." : $"{attacks.Count} incoming attack(s); next lands {attacks[0].ArrivalUtc.ToLocalTime():HH:mm:ss}.");
+                return;
+            }
+
             if (job.Task == MarkReadTask)
             {
                 await MarkInboxReadCoreAsync(options, cancellationToken);
@@ -1126,6 +1380,11 @@ public sealed class BotEngine
         if (features.CollectDailyQuests)
         {
             jobs.Add(new Job("collect_daily_quests", "Collect daily quests", "collect_daily_quests", empty, 180, 300));
+        }
+
+        if (features.AttackWatch)
+        {
+            jobs.Add(new Job("attack_watch", "Watch for incoming attacks", AttackWatchTask, empty, 4, 8));
         }
 
         if (features.MarkRead)

@@ -41,6 +41,10 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
      targets, and Town Hall and Brewery celebrations.
    - **Transfers** — send resources and reinforcements between your own villages on a schedule.
    - **Catapults** — prepare a first attack plus following waves and send them together.
+   - **Under attack** (in Settings) — the bot checks for incoming attacks every few minutes, sends
+     a macOS notification, spends resources shortly before the hit and can move your troops out on
+     a raid timed to return afterwards. An overflow guard trains troops or queues a field upgrade
+     when a resource is about to hit its storage cap.
    - **Settings** — startup (log in and start the bot when the app opens) and session pacing (play
      for a while, close the browser for a break, optional active hours), NPC trade and gold limits, bonus videos (25% faster build, +15% production),
      and marking messages and reports as read.

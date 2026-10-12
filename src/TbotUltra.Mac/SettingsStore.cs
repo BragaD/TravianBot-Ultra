@@ -19,6 +19,7 @@ public sealed class FeatureToggles
     public bool Reinforcements { get; set; }
     public bool ProductionBonus { get; set; }
     public bool MarkRead { get; set; }
+    public bool AttackWatch { get; set; } = true;
 }
 
 public sealed class BuildItem
