@@ -79,8 +79,23 @@ public sealed class FarmRaidState
     public Dictionary<string, double> TroopScale { get; set; } = new(StringComparer.Ordinal);
 }
 
+/// <summary>What the bot got done on one calendar day (local time).</summary>
+public sealed class DailyStats
+{
+    public int BuildsFinished { get; set; }
+    public int RaidsSent { get; set; }
+    public long ResourcesRaided { get; set; }
+    public int TrainingBatches { get; set; }
+    public int AdventuresSent { get; set; }
+    public int AttacksSeen { get; set; }
+    public int TargetsPutOnHold { get; set; }
+    public bool SummarySent { get; set; }
+}
+
 public sealed class MacSettings
 {
+    /// <summary>Per-day counters keyed by local date (yyyy-MM-dd); the last two weeks are kept.</summary>
+    public Dictionary<string, DailyStats> Daily { get; set; } = new(StringComparer.Ordinal);
     public StartupSettings Startup { get; set; } = new();
     public FarmRaidState FarmRaids { get; set; } = new();
     public FeatureToggles Features { get; set; } = new();

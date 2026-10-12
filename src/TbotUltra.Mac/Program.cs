@@ -103,6 +103,7 @@ app.MapGet("/api/state", () =>
         attacks = engine.Attacks(),
         culture = engine.Culture,
         celebrationsWanted = active.Length == 0 || engine.CelebrationsWanted(settings.Load(active)),
+        today = DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
         settleSpots = engine.SettleSpots,
         catapultSetup = engine.CatapultSetup,
         farmLists = engine.FarmLists,
@@ -315,6 +316,12 @@ app.MapPost("/api/start", () =>
 });
 
 app.MapPost("/api/stop", () => Fire(engine.StopAsync));
+
+app.MapPost("/api/daily/send", () =>
+{
+    engine.SendDailySummary(RequireAccount());
+    return Results.Ok();
+});
 
 app.MapPost("/api/notify/test", () =>
 {
@@ -650,6 +657,8 @@ object BuildSummary()
             onHold = current.FarmRaids.OnHold,
             raidScale = current.FarmRaids.TroopScale,
         },
+        daily = current.Daily.OrderByDescending(pair => pair.Key, StringComparer.Ordinal).Take(7)
+            .ToDictionary(pair => pair.Key, pair => pair.Value),
         incomingAttacks = engine.Attacks(),
         expansion = new
         {

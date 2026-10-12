@@ -73,6 +73,10 @@ public static class MacDefaults
         ["mac_celebrate_only_when_cp_short"] = "true",
         ["town_hall_celebration_mode"] = "small",
 
+        // Daily summary notification.
+        ["mac_daily_summary_enabled"] = "true",
+        ["mac_daily_summary_hour"] = "21",
+
         // Raid sizing from reports.
         ["mac_raid_sizing_enabled"] = "true",
 

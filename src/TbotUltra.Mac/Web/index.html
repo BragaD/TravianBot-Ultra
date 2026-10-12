@@ -107,6 +107,8 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
     <div class="tiles" id="tiles"></div>
     <div class="row" style="margin:14px 0 8px"><h2 style="margin:0;flex:1">Villages</h2><span class="muted" id="villagesNote"></span><button class="btn" id="btnScan">Scan all villages</button></div>
     <div id="villageCards" class="vgrid"></div>
+    <div class="card"><div class="row"><h2 style="margin:0;flex:1">Today</h2><button class="mini" data-post="/api/daily/send">Send summary now</button></div>
+      <div class="tiles" id="todayTiles" style="margin-top:8px"></div></div>
     <div class="twocol">
       <div class="card"><h2>Scheduled work</h2><div id="jobs" class="muted">Nothing scheduled.</div></div>
       <div class="card"><h2>Recent activity</h2><div id="events" class="muted">Nothing yet.</div></div>
@@ -196,6 +198,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
       <div class="row" id="attackOptions"></div>
       <div class="row" style="margin-top:8px"><button class="btn" data-post="/api/notify/test">Send a test notification</button></div></div>
     <div class="card"><h2>Storage overflow</h2><div class="row" id="overflowOptions"></div></div>
+    <div class="card"><h2>Daily summary</h2><div class="row" id="dailyOptions"></div></div>
     <div class="card"><h2>Startup</h2><div class="row" id="startupOptions"></div></div>
     <div class="card"><h2>Session pacing</h2>
       <p class="muted" style="margin-top:0">Play for a while, then close the browser and come back later, like a person would. Outside the active hours the bot stays logged out.</p>
@@ -359,6 +362,9 @@ function renderStatic() {
     boolOption("construct_faster_random_enabled", "only sometimes", false),
     numberOption("construct_faster_random_chance_percent", "chance %", 50, 1, 100),
     boolOption("turn_off_video_sound", "Mute videos", true)].join("");
+  $("dailyOptions").innerHTML = [
+    boolOption("mac_daily_summary_enabled", "Send a notification with the day's results", true),
+    numberOption("mac_daily_summary_hour", "at hour", 21, 0, 23)].join("");
   $("autofarmOptions").innerHTML = [
     boolOption("mac_autofarm_enabled", "Add empty oases", false),
     numberOption("mac_autofarm_radius", "within", 10, 1, 40), "<span>fields,</span>",
@@ -489,6 +495,12 @@ function renderDashboard() {
       <div class="row" style="margin-top:8px"><label style="flex:1"><input type="checkbox" data-village="${esc(v.key)}" data-village-field="enabled" ${vs.enabled !== false ? "checked" : ""}> Automate this village</label>
         <span class="muted">${age == null ? "not read yet" : age < 1 ? "read just now" : `read ${age} min ago`}</span></div></div>`;
   }).join("") : '<div class="card muted" style="margin:0">Log in to load your villages.</div>';
+
+  const day = (state.settings.daily || {})[state.today] || {};
+  $("todayTiles").innerHTML = [
+    tile("Builds finished", fmt(day.buildsFinished || 0)), tile("Troop batches", fmt(day.trainingBatches || 0)),
+    tile("Raids sent", fmt(day.raidsSent || 0), `${fmt(day.resourcesRaided || 0)} resources raided`),
+    tile("Adventures", fmt(day.adventuresSent || 0)), tile("Attacks seen", fmt(day.attacksSeen || 0), `${fmt(day.targetsPutOnHold || 0)} targets put on hold`)].join("");
 
   // ----- scheduled work and activity
   $("jobs").innerHTML = state.jobs.length ? `<table><tr><th>Work</th><th>Next run</th><th></th></tr>${state.jobs.map(job =>

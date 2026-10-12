@@ -109,6 +109,9 @@ change anything this way; changes need the HTTP API.
                "raidsOut": { "89|81": "2026-10-11T20:39:10Z" },
                "onHold":  { "92|85": { "reason": "Last raid had losses", "sinceUtc": "…" } },
                "raidScale": { "89|81": 1.25 } },   // raid size factor per target, from carry reports
+  "daily": { "2026-10-11": { "buildsFinished": 4, "raidsSent": 6, "resourcesRaided": 1800,
+                             "trainingBatches": 9, "adventuresSent": 3,
+                             "attacksSeen": 0, "targetsPutOnHold": 1, "summarySent": true } },  // last 7 days
   "incomingAttacks": [{ "id": "…", "villageKey": "xy:95|80", "villageName": "Alpha",
                         "arrivalUtc": "…", "type": "Raid", "fromPlayer": "…",
                         "fromVillage": "…", "fromX": 90, "fromY": 77 }],   // soonest first
@@ -148,6 +151,7 @@ job, and by `POST /api/scan`. `stock.current` is a snapshot; estimate now as
 | `POST /api/wake` | Ends a pacing break early. |
 | `POST /api/scan` | Re-reads every village (202). Use before planning if `updatedUtc` is old. |
 | `POST /api/cancel` | Cancels the manual operation shown in `status.busy`. |
+| `POST /api/daily/send` | Sends today's summary notification now and records it in `recentEvents`. |
 | `POST /api/alert/clear` | Clears `status.alert` once you have handled it. |
 | `POST /api/jobs/run` `{"key":"<job key>"}` | Makes one scheduled job due now. Keys are in `jobs[].key`: `hero`, `farming`, `collect_tasks`, `build:<village key>`, `troops:<village key>`, … |
 
@@ -278,6 +282,7 @@ Current values are `settings.options` in `GET /api/state`; anything not listed t
 | `mac_attack_spend_enabled`, `mac_attack_spend_lead_minutes` | `true`/`false`, minutes | Run the village's build and training jobs this long before a hit, so less can be plundered. |
 | `mac_evasion_enabled`, `mac_evasion_target`, `mac_evasion_lead_minutes`, `mac_evasion_include_hero` | `true`/`false`, `"x\|y"`, minutes, `true`/`false` | Shortly before a hit, send all troops on a raid to the target, timed to return after it. **Sends an attack**: see section 9. |
 | `mac_celebrate_only_when_cp_short`, `town_hall_celebration_mode` | `true`/`false`, `small` \| `big` | Hold Town Hall celebrations only while culture points are short for the next village; which celebration to hold. Needs the `townHall` feature and `townHall: true` on the village. |
+| `mac_daily_summary_enabled`, `mac_daily_summary_hour` | `true`/`false`, `0`–`23` | macOS notification with the day's counts at that local hour. |
 | `mac_raid_sizing_enabled` | `true`/`false` | Without Gold Club: scale a target's raid up 25% when the last raid came home full, down 20% when under 40% full (limits ×0.5–×4). |
 | `mac_autofarm_enabled`, `mac_autofarm_radius`, `mac_autofarm_max_per_run`, `mac_autofarm_interval_hours`, `mac_autofarm_troop`, `mac_autofarm_troop_count`, `mac_autofarm_list` | `true`/`false`, fields, count, hours, troop name, count, list name | Periodically add the nearest empty, unoccupied oases to a farm list. **Adds attack targets**: see section 9. Job key `autofarm`. |
 | `mac_overflow_guard_enabled`, `mac_overflow_threshold_percent` | `true`/`false`, `50`–`100` | When a resource reaches this share of storage: train troops, and queue one field upgrade if no build item is pending. |

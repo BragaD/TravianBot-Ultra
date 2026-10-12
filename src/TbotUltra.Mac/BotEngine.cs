@@ -744,6 +744,7 @@ public sealed class BotEngine
                 }
 
                 await RespondToAttacksAsync(account, settings, cancellationToken);
+                SendDailySummaryIfDue(account.Name, settings);
                 GuardAgainstOverflow(account.Name, settings);
                 WatchCropBalance(account.Name, settings);
                 var jobs = BuildJobs(settings, account.Name);
@@ -840,6 +841,7 @@ public sealed class BotEngine
             {
                 var from = string.IsNullOrWhiteSpace(attack.FromPlayer) ? "an unknown player" : attack.FromPlayer;
                 var text = $"{attack.Type} on {village.Name} from {from} lands at {attack.ArrivalUtc.ToLocalTime():HH:mm:ss}.";
+                Count(account.Name, day => day.AttacksSeen++);
                 Log($"[mac] INCOMING ATTACK: {text}");
                 Alert = $"Incoming attack: {text}";
                 RecordEvent("Incoming attack", text);
@@ -1027,6 +1029,75 @@ public sealed class BotEngine
 
         ApplyFarmLists(await _runner.ReadFarmListsOverviewAsync(options, Log, cancellationToken: cancellationToken));
         return added > 0 ? $"Added {added} new empty oasis target(s)." : "No new empty oases nearby.";
+    }
+
+    // ----- Daily summary ---------------------------------------------------------------------------
+
+    private static string Today => DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private void Count(string accountName, Action<DailyStats> change)
+    {
+        if (accountName.Length == 0)
+        {
+            return;
+        }
+
+        _settings.Update(accountName, settings =>
+        {
+            if (!settings.Daily.TryGetValue(Today, out var day))
+            {
+                settings.Daily[Today] = day = new DailyStats();
+                foreach (var old in settings.Daily.Keys.OrderByDescending(key => key, StringComparer.Ordinal).Skip(14).ToList())
+                {
+                    settings.Daily.Remove(old);
+                }
+            }
+
+            change(day);
+        });
+    }
+
+    internal static string DescribeDay(DailyStats day)
+    {
+        var parts = new List<string>();
+        void Add(long value, string singular, string plural)
+        {
+            if (value > 0)
+            {
+                parts.Add($"{value.ToString("N0", CultureInfo.InvariantCulture)} {(value == 1 ? singular : plural)}");
+            }
+        }
+
+        Add(day.BuildsFinished, "build finished", "builds finished");
+        Add(day.TrainingBatches, "troop batch queued", "troop batches queued");
+        Add(day.RaidsSent, "raid sent", "raids sent");
+        Add(day.ResourcesRaided, "resource raided", "resources raided");
+        Add(day.AdventuresSent, "adventure", "adventures");
+        Add(day.TargetsPutOnHold, "farm target put on hold", "farm targets put on hold");
+        Add(day.AttacksSeen, "incoming attack seen", "incoming attacks seen");
+        return parts.Count > 0 ? string.Join(", ", parts) + "." : "Nothing to report yet.";
+    }
+
+    private void SendDailySummaryIfDue(string accountName, MacSettings settings)
+    {
+        if (!OptionOn(settings, "mac_daily_summary_enabled")
+            || DateTime.Now.Hour < ParseHour(PacingValue(settings, "mac_daily_summary_hour"))
+            || (settings.Daily.TryGetValue(Today, out var day) && day.SummarySent))
+        {
+            return;
+        }
+
+        SendDailySummary(accountName);
+    }
+
+    public void SendDailySummary(string accountName)
+    {
+        var text = DescribeDay(_settings.Load(accountName).Daily.GetValueOrDefault(Today) ?? new DailyStats());
+        var waiting = Attacks().Count > 0 ? $" {Attacks().Count} attack(s) incoming." : string.Empty;
+        Count(accountName, entry => entry.SummarySent = true);
+        Log($"[mac] today: {text}{waiting}");
+        RecordEvent("Daily summary", text + waiting);
+        Notify("Tbot Ultra — today", text + waiting);
     }
 
     // ----- Celebrations ----------------------------------------------------------------------------
@@ -1304,6 +1375,12 @@ public sealed class BotEngine
                     options, guard, Log, cancellationToken: cancellationToken);
                 if (!goldClubActive && raids is not null)
                 {
+                    Count(account.Name, day =>
+                    {
+                        day.RaidsSent += raids.Sent;
+                        day.ResourcesRaided += (raids.NewCarries ?? []).Sum(carry => carry.Carried);
+                        day.TargetsPutOnHold += (raids.NewLosses ?? []).Count;
+                    });
                     _settings.Update(account.Name, current =>
                     {
                         var state = current.FarmRaids;
@@ -1375,6 +1452,10 @@ public sealed class BotEngine
 
             var result = await _runner.ExecuteOnceAsync(options, Log, [job.Task], cancellationToken: cancellationToken);
             var message = result.LastTask?.Message ?? "completed";
+            if (job.Task == "build_troops")
+            {
+                Count(account.Name, day => day.TrainingBatches++);
+            }
             _failures.Remove(job.Key);
             if (job.BuildItemId is not null)
             {
@@ -1486,6 +1567,7 @@ public sealed class BotEngine
                     village.BuildQueue.RemoveAll(item => item.Id == job.BuildItemId);
                 }
             });
+            Count(accountName, day => day.BuildsFinished++);
             Log($"[mac] build queue item finished: {job.Title} — {message}");
             Schedule(job.Key, TimeSpan.FromSeconds(Random.Shared.Next(5, 20)), message);
             return;
@@ -1779,6 +1861,11 @@ public sealed class BotEngine
 
     private void Schedule(string key, TimeSpan delay, string result)
     {
+        if (key == "hero" && result.Contains("adventure_sent", StringComparison.OrdinalIgnoreCase))
+        {
+            Count(_accounts.ActiveAccountName(), day => day.AdventuresSent++);
+        }
+
         if (key == "hero")
         {
             // The hero job's result carries the freshest HP and adventure count the engine read.

@@ -52,6 +52,8 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
      a macOS notification, spends resources shortly before the hit and can move your troops out on
      a raid timed to return afterwards. An overflow guard trains troops or queues a field upgrade
      when a resource is about to hit its storage cap.
+   - **Daily summary** — the Dashboard counts what was done today (builds, troop batches, raids and
+     what they carried, adventures, attacks seen) and a notification sums it up each evening.
    - **Settings** — startup (log in and start the bot when the app opens) and session pacing (play
      for a while, close the browser for a break, optional active hours), NPC trade and gold limits, bonus videos (25% faster build, +15% production),
      and marking messages and reports as read.
