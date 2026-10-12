@@ -327,7 +327,8 @@ function renderStatic() {
     selectOption("continuous_farm_send_mode", "Mode", "shared_schedule",
       [["shared_schedule", "All lists on one timer"], ["list_per_list", "Each list on its own timer"], ["all_at_once", "Start-all button"]]),
     numberOption("continuous_farm_dispatch_delay_min_minutes", "Send every (min minutes)", 30, 1, 1440),
-    numberOption("continuous_farm_dispatch_delay_max_minutes", "to (max minutes)", 90, 1, 1440)].join("");
+    numberOption("continuous_farm_dispatch_delay_max_minutes", "to (max minutes)", 90, 1, 1440),
+    boolOption("mac_raid_sizing_enabled", "Size raids from reports (more troops when bags come home full, fewer when nearly empty)", true)].join("");
   $("constructionOptions").innerHTML = [
     selectOption("resource_build_strategy", "Resource field order", "lowest_first", [["lowest_first", "Lowest level first"], ["smart", "Smart (by need)"]]),
     boolOption("construction_humanize_delay_enabled", "Random delay before queueing the next build", true),
@@ -772,8 +773,10 @@ function renderRaidState() {
   const raids = state.settings.farmRaids || { busyUntilUtc: {}, onHold: {} };
   const busy = Object.entries(raids.busyUntilUtc || {}).filter(([, until]) => new Date(until) > Date.now());
   const held = Object.entries(raids.onHold || {});
-  $("raidState").innerHTML = (busy.length || held.length) ? `
+  const scaled = Object.values(raids.troopScale || {}).some(scale => scale !== 1);
+  $("raidState").innerHTML = (busy.length || held.length || scaled) ? `
     ${busy.map(([key, until]) => `<span class="pill">${esc(key)} back ${when(until)}</span>`).join(" ")}
+    ${Object.entries(raids.troopScale || {}).filter(([, scale]) => scale !== 1).map(([key, scale]) => `<span class="pill" title="Raid size factor from the last reports">${esc(key)} ×${scale}</span>`).join(" ")}
     ${held.length ? `<table style="margin-top:8px"><tr><th>Target</th><th>Why</th><th>Since</th><th></th></tr>${held.map(([key, info]) =>
       `<tr><td>${esc(key)}</td><td>${esc(info.reason)}</td><td>${new Date(info.sinceUtc).toLocaleString()}</td>
        <td><button class="mini" data-release="${esc(key)}">Raid again</button></td></tr>`).join("")}</table>` : ""}`

@@ -636,6 +636,7 @@ object BuildSummary()
             selectedLists = current.FarmListNames,
             raidsOut = current.FarmRaids.BusyUntilUtc.Where(pair => pair.Value > now).ToDictionary(pair => pair.Key, pair => pair.Value),
             onHold = current.FarmRaids.OnHold,
+            raidScale = current.FarmRaids.TroopScale,
         },
         incomingAttacks = engine.Attacks(),
         expansion = new

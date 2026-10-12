@@ -40,7 +40,8 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
      The game itself only lets Gold Club accounts press a list's Start button, so without Gold Club
      the bot sends each active target of the selected lists as an ordinary raid from the Rally Point.
      In that mode it remembers which raids are still out and skips those targets, and it reads your
-     raid reports: a target whose latest raid lost troops is put on hold until you release it.
+     raid reports: a target whose latest raid lost troops is put on hold until you release it, and
+     raid sizes follow how full the last raid came home.
    - **Troops** — per-village training rules for Barracks, Stable and Workshop, Smithy upgrade
      targets, and Town Hall and Brewery celebrations.
    - **Transfers** — send resources and reinforcements between your own villages on a schedule.

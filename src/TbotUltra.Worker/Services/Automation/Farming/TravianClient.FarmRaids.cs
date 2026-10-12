@@ -25,7 +25,7 @@ public sealed partial class TravianClient
         await EnsureLoggedInAsync(cancellationToken: cancellationToken);
 
         // Loss reports first: a target that just cost troops must not be raided again this round.
-        var (newLosses, lastReportId) = await ReadNewFarmRaidLossesAsync(guard.LastReportId, holdOnSomeLosses, holdOnAllLost, cancellationToken);
+        var (newLosses, newCarries, lastReportId) = await ReadNewFarmRaidLossesAsync(guard.LastReportId, holdOnSomeLosses, holdOnAllLost, cancellationToken);
         var blocked = new HashSet<string>(guard.Blocked, StringComparer.Ordinal);
         foreach (var loss in newLosses)
         {
@@ -72,7 +72,18 @@ public sealed partial class TravianClient
                 continue;
             }
 
-            var (outcome, returnAtUtc) = await TrySendFarmRaidAsync(target, cancellationToken);
+            // Raid size follows the reports: the caller scales a target up when raids come home full
+            // and down when they come home nearly empty.
+            var scale = guard.TroopScale is not null && guard.TroopScale.TryGetValue(key, out var factor) ? factor : 1d;
+            var sized = scale == 1d
+                ? target
+                : target with { Troops = target.Troops.ToDictionary(troop => troop.Key, troop => Math.Max(1L, (long)Math.Ceiling(troop.Value * scale))) };
+            var (outcome, returnAtUtc) = await TrySendFarmRaidAsync(sized, cancellationToken);
+            if (outcome == FarmRaidOutcome.NotEnoughTroops && scale > 1d)
+            {
+                // Not enough at home for the larger raid: the list's own size is still worth sending.
+                (outcome, returnAtUtc) = await TrySendFarmRaidAsync(target, cancellationToken);
+            }
             switch (outcome)
             {
                 case FarmRaidOutcome.Sent:
@@ -93,7 +104,7 @@ public sealed partial class TravianClient
 
         Notify($"[farm-raid] done: sent={sent}, stillOut={stillRunning}, onHold={skippedOnHold}, waitingForTroops={skippedNoTroops}, failed={failed}.");
         return new FarmRaidBatchResult(
-            targets.ListCount, sent, stillRunning, skippedNoTroops, failed, skippedOnHold, sentRaids, newLosses, lastReportId);
+            targets.ListCount, sent, stillRunning, skippedNoTroops, failed, skippedOnHold, sentRaids, newLosses, lastReportId, newCarries);
     }
 
     internal static string FarmRaidKey(int x, int y)
@@ -101,7 +112,7 @@ public sealed partial class TravianClient
 
     // Reads the first page of offensive reports and returns raids newer than the last one seen that
     // came back with losses. iReport2 = won with losses, iReport3 = all troops lost.
-    private async Task<(IReadOnlyList<FarmRaidLoss> Losses, long LastReportId)> ReadNewFarmRaidLossesAsync(
+    private async Task<(IReadOnlyList<FarmRaidLoss> Losses, IReadOnlyList<FarmRaidCarry> Carries, long LastReportId)> ReadNewFarmRaidLossesAsync(
         long lastReportId,
         bool holdOnSomeLosses,
         bool holdOnAllLost,
@@ -118,11 +129,15 @@ public sealed partial class TravianClient
                   const strip = (text) => (text || '').replace(/[^0-9-]/g, '');
                   const x = strip(row.querySelector('.coordinateX')?.textContent);
                   const y = strip(row.querySelector('.coordinateY')?.textContent);
-                  return { id, level: icon ? Number(icon[1]) : 0, x: x === '' ? null : Number(x), y: y === '' ? null : Number(y) };
+                  // The carry icon's alt text is "carried/capacity", e.g. "300/300".
+                  const carry = (row.querySelector('img.reportInfo.carry')?.getAttribute('alt') || '').match(/(\d+)\s*\/\s*(\d+)/);
+                  return { id, level: icon ? Number(icon[1]) : 0, x: x === '' ? null : Number(x), y: y === '' ? null : Number(y),
+                           carried: carry ? Number(carry[1]) : null, capacity: carry ? Number(carry[2]) : null };
                 }))
                 """).WaitAsync(cancellationToken);
 
             var losses = new List<FarmRaidLoss>();
+            var carries = new List<FarmRaidCarry>();
             var judged = new HashSet<string>(StringComparer.Ordinal);
             var newest = lastReportId;
             using var document = JsonDocument.Parse(json);
@@ -158,14 +173,19 @@ public sealed partial class TravianClient
                 {
                     losses.Add(new FarmRaidLoss(x, y, level == 3, id));
                 }
+
+                if (row.GetProperty("capacity").ValueKind == JsonValueKind.Number && row.GetProperty("capacity").GetInt64() > 0)
+                {
+                    carries.Add(new FarmRaidCarry(x, y, row.GetProperty("carried").GetInt64(), row.GetProperty("capacity").GetInt64(), id));
+                }
             }
 
-            return (losses, newest);
+            return (losses, carries, newest);
         }
         catch (Exception ex) when (ex is PlaywrightException or JsonException or TimeoutException)
         {
             Notify($"[farm-raid] could not read raid reports for losses: {ex.Message}");
-            return ([], lastReportId);
+            return ([], [], lastReportId);
         }
     }
 

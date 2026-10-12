@@ -69,6 +69,9 @@ public static class MacDefaults
         ["mac_evasion_include_hero"] = "true",
         ["mac_evasion_lead_minutes"] = "6",
 
+        // Raid sizing from reports.
+        ["mac_raid_sizing_enabled"] = "true",
+
         // Farm growth: find empty oases nearby and add them to a farm list.
         ["mac_autofarm_enabled"] = "false",
         ["mac_autofarm_radius"] = "10",

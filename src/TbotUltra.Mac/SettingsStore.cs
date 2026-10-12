@@ -74,6 +74,9 @@ public sealed class FarmRaidState
     public long LastReportId { get; set; }
     public Dictionary<string, DateTimeOffset> BusyUntilUtc { get; set; } = new(StringComparer.Ordinal);
     public Dictionary<string, HeldTarget> OnHold { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>Raid size factor per target, adjusted from how full raids came home.</summary>
+    public Dictionary<string, double> TroopScale { get; set; } = new(StringComparer.Ordinal);
 }
 
 public sealed class MacSettings

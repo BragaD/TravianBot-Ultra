@@ -1248,7 +1248,9 @@ public sealed class BotEngine
                 // The game only lets Gold Club accounts start a farm list. Without it the engine sends the
                 // lists' targets as individual raids instead, and this round is done.
                 var raidState = settings.FarmRaids;
-                var guard = new FarmRaidGuard(raidState.BusyUntilUtc, raidState.OnHold.Keys.ToList(), raidState.LastReportId);
+                var sizing = OptionOn(settings, "mac_raid_sizing_enabled");
+                var guard = new FarmRaidGuard(
+                    raidState.BusyUntilUtc, raidState.OnHold.Keys.ToList(), raidState.LastReportId, sizing ? raidState.TroopScale : null);
                 var (goldClubActive, raids) = await _runner.SendFarmListTargetsAsRaidsUnlessGoldClubAsync(
                     options, guard, Log, cancellationToken: cancellationToken);
                 if (!goldClubActive && raids is not null)
@@ -1265,6 +1267,20 @@ public sealed class BotEngine
                         foreach (var raid in raids.SentRaids ?? [])
                         {
                             state.BusyUntilUtc[$"{raid.X}|{raid.Y}"] = raid.ReturnAtUtc;
+                        }
+
+                        foreach (var carry in sizing ? raids.NewCarries ?? [] : [])
+                        {
+                            // Full bags mean more was there to take; nearly empty ones mean too many went.
+                            var key = $"{carry.X}|{carry.Y}";
+                            var scale = state.TroopScale.GetValueOrDefault(key, 1d);
+                            var fill = carry.Carried / (double)carry.Capacity;
+                            var adjusted = fill >= 0.95 ? Math.Min(4d, scale * 1.25) : fill < 0.4 ? Math.Max(0.5, scale * 0.8) : scale;
+                            if (Math.Abs(adjusted - scale) > 0.001)
+                            {
+                                state.TroopScale[key] = Math.Round(adjusted, 2);
+                                Log($"[mac] raid size for ({key}) now ×{adjusted.ToString("0.##", CultureInfo.InvariantCulture)}: last raid carried {carry.Carried}/{carry.Capacity}.");
+                            }
                         }
 
                         foreach (var loss in raids.NewLosses ?? [])

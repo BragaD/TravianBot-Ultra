@@ -428,7 +428,11 @@ public sealed record FarmRaidLoss(int X, int Y, bool AllLost, long ReportId);
 public sealed record FarmRaidGuard(
     IReadOnlyDictionary<string, DateTimeOffset> BusyUntilUtc,
     IReadOnlyCollection<string> Blocked,
-    long LastReportId);
+    long LastReportId,
+    IReadOnlyDictionary<string, double>? TroopScale = null);
+
+/// <summary>What a target's most recent raid carried home against what the troops could carry.</summary>
+public sealed record FarmRaidCarry(int X, int Y, long Carried, long Capacity, long ReportId);
 
 public sealed record FarmRaidBatchResult(
     int ListCount,
@@ -439,7 +443,8 @@ public sealed record FarmRaidBatchResult(
     int SkippedOnHold = 0,
     IReadOnlyList<FarmRaidSent>? SentRaids = null,
     IReadOnlyList<FarmRaidLoss>? NewLosses = null,
-    long LastReportId = 0);
+    long LastReportId = 0,
+    IReadOnlyList<FarmRaidCarry>? NewCarries = null);
 
 public sealed record FarmListSendBatchResult(
     IReadOnlyList<FarmListSendEntry> AttemptedLists,
