@@ -15,6 +15,83 @@ public sealed partial class TravianClient : IMapOasisAreaReader
     public Task<string> ReadMapAreaAsync(int x, int y, CancellationToken cancellationToken)
         => ReadMapAreaAsync(x, y, zoomLevel: 3, cancellationToken);
 
+    /// <summary>
+    /// Lists unoccupied valleys within <paramref name="radius"/> fields of a centre, for choosing where
+    /// to settle. Uses the same map API areas as the oasis scan, at the first zoom that returns tiles.
+    /// </summary>
+    public async Task<IReadOnlyList<FreeValley>> FindFreeValleysAsync(int centerX, int centerY, int radius, CancellationToken cancellationToken)
+    {
+        await PrepareMapOasisScanAsync(cancellationToken);
+        radius = Math.Clamp(radius, 1, 40);
+
+        // Width and height of the area one map API call returns at each zoom level.
+        (int Zoom, int Width, int Height)[] zooms = [(3, 31, 31), (2, 21, 17), (1, 11, 9)];
+        var found = new Dictionary<(int X, int Y), FreeValley>();
+        foreach (var (zoom, width, height) in zooms)
+        {
+            var firstArea = await ReadMapAreaAsync(centerX, centerY, zoom, cancellationToken);
+            if (MapOasisApiParser.IsRegionOverlay(firstArea))
+            {
+                continue;
+            }
+
+            var areas = 0;
+            for (var y = centerY - radius + (height / 2); y - (height / 2) <= centerY + radius; y += height)
+            {
+                for (var x = centerX - radius + (width / 2); x - (width / 2) <= centerX + radius; x += width)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var json = areas == 0 && x == centerX && y == centerY ? firstArea : await ReadMapAreaAsync(x, y, zoom, cancellationToken);
+                    areas++;
+                    foreach (var valley in MapOasisApiParser.ParseFreeValleys(json))
+                    {
+                        if (Math.Abs(valley.X - centerX) <= radius && Math.Abs(valley.Y - centerY) <= radius)
+                        {
+                            found[(valley.X, valley.Y)] = valley;
+                        }
+                    }
+
+                    await Task.Delay(Random.Shared.Next(350, 800), cancellationToken); // Human-like map panning.
+                }
+            }
+
+            Notify($"[settle] read {areas} map area(s) at zoom {zoom}; {found.Count} free valleys within {radius} of ({centerX}|{centerY}).");
+            break;
+        }
+
+        return found.Values.ToList();
+    }
+
+    /// <summary>Reads the account's culture points from the game shell's embedded state.</summary>
+    public async Task<CulturePoints?> ReadCulturePointsAsync(CancellationToken cancellationToken)
+    {
+        await EnsureLoggedInAsync(cancellationToken: cancellationToken);
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var json = await _page.EvaluateAsync<string?>(
+                """
+                () => {
+                  const match = (document.documentElement?.innerHTML || '').match(/"culturalPointsOverview"\s*:\s*(\{[^}]*\})/);
+                  return match ? match[1] : null;
+                }
+                """).WaitAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                using var document = System.Text.Json.JsonDocument.Parse(json);
+                var root = document.RootElement;
+                int Read(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == System.Text.Json.JsonValueKind.Number ? value.GetInt32() : 0;
+                return new CulturePoints(
+                    Read("usedSlots"), Read("maxControllableVillages"), Read("cpProducedForNextSlot"), Read("cpNeededForNextSlot"), Read("cpProductionTotal"));
+            }
+
+            // Not every page embeds the village-list state; the village overview always does.
+            await GotoAsync(Paths.Resources, cancellationToken);
+            await WaitForPageReadyAsync(cancellationToken);
+        }
+
+        return null;
+    }
+
     public async Task<MapOasisApiCapture> CaptureCurrentMapAreaAsync(CancellationToken cancellationToken)
     {
         if (!IsCurrentUrlForPath(Paths.Map))

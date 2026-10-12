@@ -42,6 +42,19 @@ public sealed record AccountView(int? Gold, int? Silver, int UnreadMessages, int
 
 public sealed record EventView(DateTimeOffset At, string Title, string Result);
 
+public sealed record CultureView(int UsedSlots, int MaxVillages, int Produced, int Needed, int PerDay, DateTimeOffset UpdatedUtc)
+{
+    /// <summary>True when the account may found or conquer one more village right now.</summary>
+    public bool SlotFree => MaxVillages > UsedSlots;
+
+    /// <summary>When enough culture points for the next slot will have accrued, if not already.</summary>
+    public DateTimeOffset? ReadyAtUtc => Produced >= Needed
+        ? null
+        : PerDay > 0 ? UpdatedUtc.AddDays((Needed - Produced) / (double)PerDay) : null;
+}
+
+public sealed record SettleSpot(int X, int Y, string Layout, string Kind, double Distance);
+
 public sealed record AttackView(
     string Id,
     string VillageKey,
@@ -91,6 +104,7 @@ public sealed class BotEngine
     // Not engine tasks: the loop runs these itself.
     private const string MarkReadTask = "mark_inbox_read";
     private const string AttackWatchTask = "watch_incoming_attacks";
+    private const string CultureTask = "read_culture_points";
 
     private readonly object _sync = new();
     private readonly string _root;
@@ -118,6 +132,8 @@ public sealed class BotEngine
     private readonly HashSet<string> _evadedAttacks = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _overflowActedAt = new(StringComparer.OrdinalIgnoreCase);
     private AccountView? _account;
+    private CultureView? _culture;
+    private List<SettleSpot> _settleSpots = [];
     private DateTimeOffset? _sleepUntilUtc;
     private volatile bool _wakeRequested;
     private ScanView? _scan;
@@ -177,6 +193,10 @@ public sealed class BotEngine
     public ScanView? Scan => _scan;
 
     public AccountView? Account => _account;
+
+    public CultureView? Culture => _culture;
+
+    public IReadOnlyList<SettleSpot> SettleSpots => _settleSpots;
 
     /// <summary>Incoming attacks that have not landed yet, soonest first.</summary>
     public IReadOnlyList<AttackView> Attacks()
@@ -394,6 +414,44 @@ public sealed class BotEngine
             throw new InvalidOperationException(
                 $"The game did not accept {result.FailedCount} target(s) for '{listName}'. It can refuse small raids — try a larger troop count.");
         }
+    });
+
+    public Task ReadCultureAsync() => RunManualAsync("Reading culture points", async cancellationToken =>
+    {
+        var account = RequireActiveAccount();
+        await ReadCultureCoreAsync(BuildOptions(account, _settings.Load(account.Name)), cancellationToken);
+    });
+
+    private async Task ReadCultureCoreAsync(BotOptions options, CancellationToken cancellationToken)
+    {
+        if (await _runner.ReadCulturePointsAsync(options, Log, cancellationToken: cancellationToken) is { } points)
+        {
+            _culture = new CultureView(points.UsedSlots, points.MaxVillages, points.Produced, points.Needed, points.ProductionPerDay, DateTimeOffset.UtcNow);
+        }
+    }
+
+    public Task FindSettleSpotsAsync(string villageKey, int radius) => RunManualAsync("Looking for places to settle", async cancellationToken =>
+    {
+        var account = RequireActiveAccount();
+        var village = Villages(account.Name).FirstOrDefault(item => item.Key == villageKey)
+            ?? throw new InvalidOperationException("Unknown village.");
+        if (village.X is not int x || village.Y is not int y)
+        {
+            throw new InvalidOperationException("This village's coordinates are not known yet. Scan villages first.");
+        }
+
+        var valleys = await _runner.FindFreeValleysAsync(
+            BuildOptions(account, _settings.Load(account.Name)), x, y, radius, Log, cancellationToken: cancellationToken);
+        _settleSpots = valleys
+            .Select(valley => new SettleSpot(
+                valley.X,
+                valley.Y,
+                valley.Layout,
+                valley.FieldType switch { 6 => "15 cropper", 1 => "9 cropper", 7 or 8 or 9 => "7 crop fields", _ => "standard" },
+                Math.Round(Math.Sqrt(Math.Pow(valley.X - x, 2) + Math.Pow(valley.Y - y, 2)), 1)))
+            .OrderBy(spot => spot.Distance)
+            .ToList();
+        Log($"[mac] found {_settleSpots.Count} free valleys within {radius} fields of {village.Name}.");
     });
 
     public Task MarkInboxReadAsync() => RunManualAsync("Marking messages and reports as read", async cancellationToken =>
@@ -1057,6 +1115,15 @@ public sealed class BotEngine
         var options = BotOptionsPayloadApplier.Apply(BuildOptions(account, settings), job.Payload);
         try
         {
+            if (job.Task == CultureTask)
+            {
+                await ReadCultureCoreAsync(options, cancellationToken);
+                Schedule(job.Key, job.SuccessInterval(), _culture is { } culture
+                    ? $"Culture points {culture.Produced}/{culture.Needed}, +{culture.PerDay} per day."
+                    : "Culture points could not be read.");
+                return;
+            }
+
             if (job.Task == AttackWatchTask)
             {
                 var soonest = await WatchIncomingAttacksAsync(account, settings, options, cancellationToken);
@@ -1381,6 +1448,9 @@ public sealed class BotEngine
         {
             jobs.Add(new Job("collect_daily_quests", "Collect daily quests", "collect_daily_quests", empty, 180, 300));
         }
+
+        // Cheap page read that keeps the expansion view current; always on.
+        jobs.Add(new Job("culture", "Read culture points", CultureTask, empty, 60, 120));
 
         if (features.AttackWatch)
         {

@@ -101,6 +101,8 @@ app.MapGet("/api/state", () =>
         account = engine.Account,
         events = engine.Events(),
         attacks = engine.Attacks(),
+        culture = engine.Culture,
+        settleSpots = engine.SettleSpots,
         catapultSetup = engine.CatapultSetup,
         farmLists = engine.FarmLists,
         villages = engine.Villages(active),
@@ -246,6 +248,42 @@ app.MapPost("/api/farmlists/targets", (FarmTargetsAdd request) =>
     return Fire(() => engine.AddFarmTargetsAsync(request.ListName, request.TroopType, request.TroopCount, coordinates));
 });
 app.MapPost("/api/inbox/read", () => Fire(engine.MarkInboxReadAsync));
+app.MapPost("/api/expansion/culture", () => Fire(engine.ReadCultureAsync));
+app.MapPost("/api/expansion/spots", (SpotSearch request) =>
+    Fire(() => engine.FindSettleSpotsAsync(request.VillageKey, Math.Clamp(request.Radius, 1, 40))));
+
+// Queues what a village needs before it can train settlers: a Residence at level 10.
+app.MapPost("/api/villages/{key}/expansion/prepare", (string key) =>
+{
+    var account = RequireAccount();
+    var village = RequireVillageView(account, key);
+    PlanResult? plan = null;
+    settings.Update(account, current =>
+    {
+        var queue = RequireVillage(current, key).BuildQueue;
+        var template = new BuildTemplate
+        {
+            Name = "Expansion",
+            Steps =
+            [
+                new TemplateStep { Kind = "building", Gid = 15, Name = "Main Building", TargetLevel = 5 },
+                new TemplateStep { Kind = "building", Gid = 25, Name = "Residence", TargetLevel = 10 },
+            ],
+        };
+
+        // A Palace or Command Center already does the Residence's job.
+        if (village.Buildings.Any(building => building.Gid is 26 or 44))
+        {
+            var seat = village.Buildings.First(building => building.Gid is 26 or 44);
+            template.Steps[1] = new TemplateStep { Kind = "building", Gid = seat.Gid, Name = seat.Name, TargetLevel = 10 };
+        }
+
+        plan = BuildPlanner.PlanTemplate(template, village, queue, engine.Tribe);
+        queue.AddRange(plan.Items);
+    });
+    engine.RunJobNow($"build:{key}");
+    return Results.Json(new { added = plan!.Items.Count, notes = plan.Notes });
+});
 app.MapPost("/api/hero/bonus/{kind}", (string kind) => Fire(() => engine.RunAdventureBonusAsync(kind)));
 app.MapPost("/api/production-bonus", () => Fire(engine.RunProductionBonusAsync));
 app.MapPost("/api/scan/oases", (OasisScanRequest request) =>
@@ -600,6 +638,13 @@ object BuildSummary()
             onHold = current.FarmRaids.OnHold,
         },
         incomingAttacks = engine.Attacks(),
+        expansion = new
+        {
+            culturePoints = engine.Culture,
+            slotFree = engine.Culture?.SlotFree,
+            enoughCulturePointsAtUtc = engine.Culture?.ReadyAtUtc,
+            settleSpots = engine.SettleSpots.Take(40),
+        },
         jobs = engine.Jobs(),
         recentEvents = engine.Events(),
     };
@@ -672,6 +717,8 @@ internal sealed record PromptAnswer(string Id, string? Value);
 internal sealed record JobRequest(string Key);
 
 internal sealed record TemplateName(string Name);
+
+internal sealed record SpotSearch(string VillageKey, int Radius);
 
 internal sealed record QueueReplacement(List<BuildItem>? Items, bool? Preflight);
 

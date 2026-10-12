@@ -110,6 +110,12 @@ change anything this way; changes need the HTTP API.
   "incomingAttacks": [{ "id": "…", "villageKey": "xy:95|80", "villageName": "Alpha",
                         "arrivalUtc": "…", "type": "Raid", "fromPlayer": "…",
                         "fromVillage": "…", "fromX": 90, "fromY": 77 }],   // soonest first
+  "expansion": { "culturePoints": { "usedSlots": 1, "maxVillages": 1, "produced": 88,
+                                    "needed": 200, "perDay": 51, "updatedUtc": "…" },
+                 "slotFree": false,                 // may a new village be founded right now?
+                 "enoughCulturePointsAtUtc": "…",    // null when there are already enough
+                 "settleSpots": [{ "x": 91, "y": 77, "layout": "1-1-1-15",
+                                   "kind": "15 cropper", "distance": 5.0 }] },   // after a search
   "jobs": [{ "key": "hero", "title": "Hero: adventures", "dueUtc": "…", "lastResult": "…" }],
   "recentEvents": [{ "at": "…", "title": "Train troops in Alpha", "result": "…" }]
 }
@@ -296,6 +302,17 @@ Current values are `settings.options` in `GET /api/state`; anything not listed t
 ```
 
 The same keys exist with `stable` and `workshop` in place of `barracks`.
+
+### Expansion
+
+| Request | Effect |
+|---|---|
+| `POST /api/expansion/culture` | Re-reads culture points (202). They are also refreshed every hour or two. |
+| `POST /api/expansion/spots` `{"villageKey","radius"}` | Searches the map for unoccupied valleys within `radius` (1–40) fields (202). Results: `expansion.settleSpots`, nearest first; `layout` is wood-clay-iron-crop field counts. |
+| `POST /api/villages/{key}/expansion/prepare` | Queues what the village needs to train settlers (Main Building 5, Residence 10), with storage preflight. Returns `{"added","notes"}`. |
+
+The bot does not train settlers or found the village; tell the user when `slotFree` is true and the
+Residence is level 10 so they can do that in the game.
 
 ### Farming
 

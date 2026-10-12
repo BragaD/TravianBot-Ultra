@@ -93,6 +93,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
     <button data-tab="villages">Building</button>
     <button data-tab="troops">Troops</button>
     <button data-tab="hero">Hero</button>
+    <button data-tab="expansion">Expansion</button>
     <button data-tab="farming">Farming</button>
     <button data-tab="transfers">Transfers</button>
     <button data-tab="catapults">Catapults</button>
@@ -153,6 +154,16 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
       <h3>Travco inactive villages</h3><div class="row" id="travcoForm"></div></div>
     <div class="card"><h2 id="scanTitle">Search results</h2><div id="scanStatus" class="muted">No search run yet.</div>
       <div class="row" id="scanActions" style="margin:8px 0"></div><div id="scanRows" style="max-height:340px;overflow:auto"></div></div>
+  </section>
+
+  <section id="tab-expansion">
+    <div class="tiles" id="cultureTiles"></div>
+    <div class="card" style="margin-top:12px"><h2>What a new village needs</h2><div id="expansionChecklist" class="muted">Log in to check.</div></div>
+    <div class="card"><div class="row"><h2 style="margin:0;flex:1">Places to settle</h2>
+        <label>around <select id="spotVillage"></select></label><label>radius <input type="number" id="spotRadius" min="1" max="40" value="12"></label>
+        <label><input type="checkbox" id="spotCroppers"> croppers only</label><button class="btn" id="btnSpots">Search the map</button></div>
+      <div id="spotRows" class="muted" style="margin-top:8px;max-height:360px;overflow:auto">No search run yet.</div></div>
+    <p class="muted">The bot prepares the village and finds the spot. Training the three settlers and sending them is still done by hand in the game.</p>
   </section>
 
   <section id="tab-transfers">
@@ -669,7 +680,7 @@ async function refresh() {
   if (state.tribe !== catalogTribe) { catalog = await api("GET", "/api/catalog"); catalogTribe = state.tribe; }
   const editing = document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
   if (staticRenderedFor !== state.activeAccount || !editing) { renderStatic(); staticRenderedFor = state.activeAccount; }
-  renderHeader(); renderDashboard(); renderBuild(); renderTroops(); renderHero(); renderHeroStats(); renderFarming(); renderFarmLoss(); renderRaidState(); renderFarmForms(); renderScan(); renderTransfers(); renderCatapults(); renderAccounts(); renderPrompt();
+  renderHeader(); renderDashboard(); renderBuild(); renderTroops(); renderHero(); renderHeroStats(); renderFarming(); renderFarmLoss(); renderRaidState(); renderFarmForms(); renderScan(); renderExpansion(); renderTransfers(); renderCatapults(); renderAccounts(); renderPrompt();
 }
 async function pollLogs() {
   const lines = await api("GET", `/api/logs?after=${lastLogId}`);
@@ -755,6 +766,33 @@ function renderRaidState() {
       `<tr><td>${esc(key)}</td><td>${esc(info.reason)}</td><td>${new Date(info.sinceUtc).toLocaleString()}</td>
        <td><button class="mini" data-release="${esc(key)}">Raid again</button></td></tr>`).join("")}</table>` : ""}`
     : "No raids are out and no targets are on hold.";
+}
+
+// ----- Expansion --------------------------------------------------------------------------------
+function renderExpansion() {
+  const cp = state.culture, village = state.villages.find(v => v.key === ($("spotVillage")?.value || selectedVillage)) || state.villages[0];
+  const ready = cp && cp.produced >= cp.needed;
+  $("cultureTiles").innerHTML = cp ? [
+    tile("Culture points", `${fmt(cp.produced)} / ${fmt(cp.needed)}`, ready ? "enough for the next village" : `+${fmt(cp.perDay)} per day`, true),
+    tile("Next village", ready ? "Ready" : cp.readyAtUtc ? countdown(cp.readyAtUtc) : "–", ready ? "culture points are not the limit" : cp.readyAtUtc ? `around ${new Date(cp.readyAtUtc).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "no culture production"),
+    tile("Villages", `${cp.usedSlots} / ${cp.maxVillages}`, cp.slotFree ? "a slot is free" : "no free slot yet"),
+  ].join("") : tile("Culture points", "–", state.loggedIn ? '<button class="mini" data-post="/api/expansion/culture">Read now</button>' : "log in to read", true);
+  if (!$("spotVillage").options.length || $("spotVillage").options.length !== state.villages.length)
+    $("spotVillage").innerHTML = state.villages.map(v => `<option value="${esc(v.key)}">${esc(v.name)}</option>`).join("");
+  if (village) {
+    const seat = village.buildings.find(b => [25, 26, 44].includes(b.gid));
+    const check = (ok, text) => `<div>${ok ? '<span class="good">✓</span>' : '<span class="warn">•</span>'} ${text}</div>`;
+    $("expansionChecklist").innerHTML = `<div style="display:grid;gap:4px;color:var(--text)">
+      ${check(ready, cp ? (ready ? "Enough culture points" : `Culture points: ${fmt(cp.needed - cp.produced)} more needed`) : "Culture points not read yet")}
+      ${check(!!seat && seat.level >= 10, seat ? `${esc(seat.name)} is level ${seat.level} in ${esc(village.name)} (level 10 trains settlers)` : `No Residence in ${esc(village.name)} yet`)}
+      ${check(false, "Three settlers trained in that building (not tracked by the bot)")}</div>
+      <div class="row" style="margin-top:10px"><button class="btn" data-prepare="${esc(village.key)}" ${seat && seat.level >= 10 ? "disabled" : ""}>Queue what ${esc(village.name)} needs for settlers</button>
+        <button class="mini" data-post="/api/expansion/culture">Refresh culture points</button></div>`;
+  }
+  const spots = (state.settleSpots || []).filter(s => !$("spotCroppers").checked || /cropper/.test(s.kind));
+  $("spotRows").innerHTML = (state.settleSpots || []).length ? `<table><tr><th>Coordinates</th><th>Distance</th><th>Fields (wood-clay-iron-crop)</th><th>Type</th></tr>${spots.slice(0, 150).map(s =>
+    `<tr><td>${s.x}|${s.y}</td><td>${s.distance}</td><td>${esc(s.layout)}</td><td>${/cropper/.test(s.kind) ? `<b>${esc(s.kind)}</b>` : esc(s.kind)}</td></tr>`).join("")}</table>
+    <p class="muted">${spots.length} of ${state.settleSpots.length} free valleys shown, nearest first.</p>` : "No search run yet.";
 }
 
 // ----- Target search ---------------------------------------------------------------------------
@@ -885,6 +923,11 @@ document.addEventListener("click", async event => {
     const saved = await api("PUT", "/api/templates", editingTemplate);
     selectedTemplate = saved.id; editingTemplate = null; document.activeElement?.blur(); return refresh();
   }
+  if (d.prepare) {
+    const result = await api("POST", `/api/villages/${encodeURIComponent(d.prepare)}/expansion/prepare`);
+    showNotice([`Added ${result.added} item(s) to the build queue.`, ...result.notes]); return refresh();
+  }
+  if (id === "btnSpots") { await api("POST", "/api/expansion/spots", { villageKey: $("spotVillage").value, radius: Number($("spotRadius").value) }); return refresh(); }
   if (d.release) { await api("POST", "/api/farmlists/release", { key: d.release }); return refresh(); }
   if (d.statMove) {
     const order = $("heroStats").dataset.order.split(","), i = order.indexOf(d.statMove), j = i + Number(d.dir);

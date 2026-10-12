@@ -30,6 +30,9 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
    - **Hero** — adventures (minimum HP, shortest/first), auto-revive, the order and maximum for
      attribute points, adventure bonus videos, and using the hero's inventory resources when a
      build is short on resources.
+   - **Expansion** — culture points and when the next village becomes possible, a checklist of what
+     the village still needs, one click to queue a Residence to level 10, and a map search for free
+     valleys (croppers flagged). Training and sending the settlers is still done by hand.
    - **Farming** — create farm lists, add targets by coordinates, and send lists on a timer (all
      lists, or only the ones you tick). Targets with losses can be switched off or moved to another
      list. The oasis scan and the Travco inactive-village search find targets you can add to a list.

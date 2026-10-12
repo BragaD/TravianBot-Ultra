@@ -10,6 +10,12 @@ public sealed record MapOasisEntry(
     string OwnerPlayer,
     string OwnerAlliance);
 
+/// <summary>An unoccupied valley a new village can be founded on. Layout is wood-clay-iron-crop fields.</summary>
+public sealed record FreeValley(int X, int Y, int FieldType, string Layout);
+
+/// <summary>Account culture points: what the next village slot needs and how fast they accrue.</summary>
+public sealed record CulturePoints(int UsedSlots, int MaxVillages, int Produced, int Needed, int ProductionPerDay);
+
 public sealed record MapOasisScanProgress(
     int CompletedAreas,
     int TotalAreas,

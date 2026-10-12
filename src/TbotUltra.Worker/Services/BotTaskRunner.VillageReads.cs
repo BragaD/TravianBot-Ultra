@@ -346,6 +346,45 @@ public sealed partial class BotTaskRunner
         return capture ?? throw new InvalidOperationException("Could not read current page HTML.");
     }
 
+    public async Task<IReadOnlyList<FreeValley>> FindFreeValleysAsync(
+        BotOptions options,
+        int centerX,
+        int centerY,
+        int radius,
+        Action<string> log,
+        string? accountName = null,
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<FreeValley> valleys = [];
+        await ExecuteWithClientAsync(
+            options,
+            log,
+            accountName,
+            interactive: false,
+            cancellationToken,
+            async client => valleys = await client.FindFreeValleysAsync(centerX, centerY, radius, cancellationToken),
+            saveStateMode: BrowserStateSaveMode.Skip);
+        return valleys;
+    }
+
+    public async Task<CulturePoints?> ReadCulturePointsAsync(
+        BotOptions options,
+        Action<string> log,
+        string? accountName = null,
+        CancellationToken cancellationToken = default)
+    {
+        CulturePoints? points = null;
+        await ExecuteWithClientAsync(
+            options,
+            log,
+            accountName,
+            interactive: false,
+            cancellationToken,
+            async client => points = await client.ReadCulturePointsAsync(cancellationToken),
+            saveStateMode: BrowserStateSaveMode.Skip);
+        return points;
+    }
+
     public async Task<MapOasisApiCapture> CaptureCurrentMapAreaAsync(
         BotOptions options,
         Action<string> log,

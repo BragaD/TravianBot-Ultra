@@ -29,6 +29,44 @@ internal static partial class MapOasisApiParser
         return true;
     }
 
+    // Travian's field-type ids for unoccupied valleys: wood-clay-iron-crop field counts.
+    private static readonly Dictionary<int, string> ValleyLayouts = new()
+    {
+        [1] = "3-3-3-9", [2] = "3-4-5-6", [3] = "4-4-4-6", [4] = "4-5-3-6", [5] = "5-3-4-6", [6] = "1-1-1-15",
+        [7] = "4-4-3-7", [8] = "3-4-4-7", [9] = "4-3-4-7", [10] = "3-5-4-6", [11] = "4-3-5-6", [12] = "5-4-3-6",
+    };
+
+    /// <summary>Reads the unoccupied valleys ("{k.vt} {k.fN}" tiles) out of one map API area.</summary>
+    public static IReadOnlyList<FreeValley> ParseFreeValleys(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("tiles", out var tiles) || tiles.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("The Travian map API response did not contain a tiles array.");
+        }
+
+        var result = new List<FreeValley>();
+        foreach (var tile in tiles.EnumerateArray())
+        {
+            if (!TryReadCoordinate(tile, "x", out var x)
+                || !TryReadCoordinate(tile, "y", out var y)
+                || !TryReadString(tile, "title", out var title))
+            {
+                continue;
+            }
+
+            var match = Regex.Match(title, @"^\{k\.vt\}\s*\{k\.f(\d+)\}");
+            if (match.Success
+                && int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fieldType)
+                && ValleyLayouts.TryGetValue(fieldType, out var layout))
+            {
+                result.Add(new FreeValley(x, y, fieldType, layout));
+            }
+        }
+
+        return result;
+    }
+
     public static IReadOnlyList<MapOasisEntry> Parse(string json)
     {
         using var document = JsonDocument.Parse(json);
