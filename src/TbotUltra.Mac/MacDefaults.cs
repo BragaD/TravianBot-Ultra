@@ -12,6 +12,13 @@ public static class MacDefaults
         ["hero_min_hp_for_adventure"] = "50",
         ["hero_adventure_pick_order"] = "shortest",
         ["hero_auto_revive"] = "true",
+
+        // The engine waits a random time before each adventure. Its own range is long, and the wait
+        // starts over whenever the browser is reopened, so the Mac app keeps it short.
+        ["hero_adventure_restart_delay_enabled"] = "true",
+        ["hero_adventure_restart_delay_min_minutes"] = "1",
+        ["hero_adventure_restart_delay_max_minutes"] = "4",
+        ["mac_keep_awake"] = "true",
         ["hero_auto_assign_points"] = "true",
         ["hero_auto_use_ointments"] = "false",
         ["hero_stat_priority"] = "resources,fighting_strength,offence_bonus,defence_bonus",

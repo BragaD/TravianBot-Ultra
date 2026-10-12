@@ -685,6 +685,7 @@ public sealed class BotEngine
 
             Alert = string.Empty;
             _failures.Clear();
+            StartKeepAwake();
             _loopCancellation = new CancellationTokenSource();
             var cancellationToken = _loopCancellation.Token;
             _loopTask = Task.Run(() => RunLoopAsync(cancellationToken), CancellationToken.None);
@@ -797,6 +798,7 @@ public sealed class BotEngine
         }
         finally
         {
+            StopKeepAwake();
             Activity = LoggedIn ? "Logged in — automation stopped" : "Not logged in";
         }
     }
@@ -1029,6 +1031,55 @@ public sealed class BotEngine
 
         ApplyFarmLists(await _runner.ReadFarmListsOverviewAsync(options, Log, cancellationToken: cancellationToken));
         return added > 0 ? $"Added {added} new empty oasis target(s)." : "No new empty oases nearby.";
+    }
+
+    // ----- Keep awake ------------------------------------------------------------------------------
+
+    private System.Diagnostics.Process? _caffeinate;
+
+    // A sleeping Mac freezes the bot: the log showed hours-long gaps. While the loop runs, hold an
+    // idle-sleep assertion through macOS's own caffeinate, tied to this process so it cannot outlive it.
+    private void StartKeepAwake()
+    {
+        var account = _accounts.ActiveAccountName();
+        if (!OperatingSystem.IsMacOS() || account.Length == 0 || !OptionOn(_settings.Load(account), "mac_keep_awake") || _caffeinate is { HasExited: false })
+        {
+            return;
+        }
+
+        try
+        {
+            _caffeinate = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("/usr/bin/caffeinate")
+            {
+                ArgumentList = { "-i", "-w", Environment.ProcessId.ToString(CultureInfo.InvariantCulture) },
+                UseShellExecute = false,
+            });
+            Log("[mac] keeping the Mac awake while the bot runs.");
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            Log($"[mac] could not keep the Mac awake: {ex.Message}");
+        }
+    }
+
+    private void StopKeepAwake()
+    {
+        try
+        {
+            if (_caffeinate is { HasExited: false })
+            {
+                _caffeinate.Kill();
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Already gone.
+        }
+        finally
+        {
+            _caffeinate?.Dispose();
+            _caffeinate = null;
+        }
     }
 
     // ----- Daily summary ---------------------------------------------------------------------------
@@ -1852,13 +1903,28 @@ public sealed class BotEngine
 
     internal static string DescribeBuildItem(BuildItem item) => item.Type switch
     {
-        "resources_all" => $"All resource fields to level {item.TargetLevel}",
+        "resources_all" => $"{DescribeFieldTypes(item.ResourceTypes)} to level {item.TargetLevel}",
         "resource_field" => $"{item.Name} (slot {item.SlotId}) to level {item.TargetLevel}",
         "building_construct" => $"Construct {item.Name} in slot {item.SlotId} to level {item.TargetLevel}",
         "building_max" => $"{item.Name} (slot {item.SlotId}) to max level",
         "building_demolish" => $"Demolish {item.Name} (slot {item.SlotId}) to level {item.TargetLevel}",
         _ => $"{item.Name} (slot {item.SlotId}) to level {item.TargetLevel}",
     };
+
+    private static string DescribeFieldTypes(string types)
+    {
+        var names = types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(type => type.ToLowerInvariant() switch
+            {
+                "wood" => "Woodcutters",
+                "clay" => "Clay pits",
+                "iron" => "Iron mines",
+                "crop" => "Croplands",
+                _ => type,
+            })
+            .ToList();
+        return names.Count is 0 or >= 4 ? "All resource fields" : string.Join(" and ", names);
+    }
 
     private DateTimeOffset DueAt(string key)
     {

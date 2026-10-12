@@ -7,9 +7,43 @@
 <style>
 :root {
   --bg: #14161a; --panel: #1c1f25; --panel2: #232730; --line: #2e333d; --text: #e6e8ec; --muted: #8e96a3;
-  --accent: #4c8dff; --good: #3fb97a; --warn: #e0a83a; --bad: #e5604f;
+  --accent: #4c8dff; --accent-text: #fff; --good: #3fb97a; --warn: #e0a83a; --bad: #e5604f;
+  /* Buttons and fields get their own surface so they stand out from the card they sit on. */
+  --btn: #232730; --btn-hover: #2b303b; --btn-border: #2e333d; --btn-text: #e6e8ec; --field: #232730; --link: #8e96a3;
+  --notice-bg: #1f2b3d; --notice-text: #cfe0ff; --alert-bg: #3a2320; --alert-text: #ffd2cb;
+  --track: rgba(76,141,255,.18); --track-warn: rgba(224,168,58,.2); --track-bad: rgba(229,96,79,.22);
 }
+/* Option A — Graphite and amber: neutral dark surfaces, warm buttons. */
+:root[data-theme="amber"] {
+  --bg: #121212; --panel: #1b1b1d; --panel2: #262629; --line: #38383d; --text: #f1efe9; --muted: #a09d96;
+  --accent: #f0a232; --accent-text: #1d1503; --good: #57c48a; --warn: #f0a232; --bad: #f0705e;
+  --btn: #34343a; --btn-hover: #42424a; --btn-border: #5b5b64; --btn-text: #f6f4ee; --field: #232326; --link: #f0a232;
+  --notice-bg: #33290f; --notice-text: #ffe2ab; --alert-bg: #3d1f1a; --alert-text: #ffd4cd;
+  --track: rgba(240,162,50,.2); --track-warn: rgba(240,162,50,.2); --track-bad: rgba(240,112,94,.24);
+}
+/* Option B — Midnight blue: deep navy surfaces, bright blue buttons. */
+:root[data-theme="midnight"] {
+  --bg: #0b1220; --panel: #121c2e; --panel2: #1b2942; --line: #2b3d5e; --text: #e8eefb; --muted: #93a4c4;
+  --accent: #3b9eff; --accent-text: #04121f; --good: #46d39a; --warn: #f5b74a; --bad: #ff7468;
+  --btn: #24406b; --btn-hover: #2e5187; --btn-border: #4b74b5; --btn-text: #f2f7ff; --field: #16233a; --link: #6fb8ff;
+  --notice-bg: #17305a; --notice-text: #d3e5ff; --alert-bg: #44211f; --alert-text: #ffd6d1;
+  --track: rgba(59,158,255,.2); --track-warn: rgba(245,183,74,.22); --track-bad: rgba(255,116,104,.24);
+}
+/* Option C — Parchment: light, warm surfaces, green buttons. */
+:root[data-theme="parchment"] {
+  --bg: #f3efe6; --panel: #fffdf8; --panel2: #ebe5d8; --line: #d2c9b6; --text: #26231d; --muted: #6f6858;
+  --accent: #2f7d32; --accent-text: #ffffff; --good: #2f7d32; --warn: #a96500; --bad: #c0392b;
+  --btn: #e3dccb; --btn-hover: #d6cdb8; --btn-border: #a99f89; --btn-text: #26231d; --field: #ffffff; --link: #1f6a23;
+  --notice-bg: #e2efdb; --notice-text: #1f4d21; --alert-bg: #f8dcd7; --alert-text: #7a1f15;
+  --track: rgba(47,125,50,.18); --track-warn: rgba(169,101,0,.2); --track-bad: rgba(192,57,43,.2);
+}
+/* Native parts of form controls (the level steppers, dropdown arrows, scrollbars) follow the
+   declared colour scheme; without it they are drawn dark-on-dark. */
+:root { color-scheme: dark; }
+:root[data-theme="parchment"] { color-scheme: light; }
 * { box-sizing: border-box; }
+/* Safari only shows the stepper arrows on hover; keep them visible. */
+input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { opacity: 1; height: 22px; cursor: pointer; }
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; display: flex; flex-direction: column; }
 header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
@@ -28,20 +62,23 @@ h2 { font-size: 14px; margin: 0 0 10px; } h3 { font-size: 13px; margin: 16px 0 6
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
-button.btn, select, input[type=text], input[type=password], input[type=number] {
-  background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font: inherit; }
-button.btn { cursor: pointer; } button.btn:hover { border-color: var(--accent); }
-button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+select, input[type=text], input[type=password], input[type=number] {
+  background: var(--field); color: var(--text); border: 1px solid var(--btn-border); border-radius: 6px; padding: 5px 9px; font: inherit; }
+button.btn { background: var(--btn); color: var(--btn-text); border: 1px solid var(--btn-border); border-radius: 6px; padding: 5px 11px; font: inherit; font-weight: 500; cursor: pointer; }
+button.btn:hover:not(:disabled) { background: var(--btn-hover); border-color: var(--accent); }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.btn.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+input[type=checkbox] { accent-color: var(--accent); }
 button.btn.danger { color: var(--bad); } button.btn:disabled { opacity: .45; cursor: default; }
-button.mini { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 5px; font: inherit; } button.mini:hover { color: var(--text); }
-input[type=number] { width: 72px; } label { display: inline-flex; align-items: center; gap: 6px; }
+button.mini { background: none; border: 0; color: var(--link); cursor: pointer; padding: 2px 5px; font: inherit; } button.mini:hover { color: var(--text); text-decoration: underline; }
+input[type=number] { width: 78px; padding-right: 4px; } label { display: inline-flex; align-items: center; gap: 6px; }
 label.field { display: flex; flex-direction: column; align-items: stretch; gap: 3px; color: var(--muted); font-size: 12px; }
 table { border-collapse: collapse; width: 100%; } td, th { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .muted { color: var(--muted); } .good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
 .pill { display: inline-block; padding: 1px 7px; border-radius: 10px; background: var(--panel2); font-size: 11px; color: var(--muted); }
-#notice { display: none; background: #1f2b3d; border-bottom: 1px solid var(--accent); color: #cfe0ff; padding: 8px 16px; white-space: pre-line; }
-#alert { display: none; background: #3a2320; border-bottom: 1px solid var(--bad); color: #ffd2cb; padding: 8px 16px; }
+#notice { display: none; background: var(--notice-bg); border-bottom: 1px solid var(--accent); color: var(--notice-text); padding: 8px 16px; white-space: pre-line; }
+#alert { display: none; background: var(--alert-bg); border-bottom: 1px solid var(--bad); color: var(--alert-text); padding: 8px 16px; }
 #logs { font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
 #logs div { padding: 0 2px; } #logs .t { color: var(--muted); }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 18px; max-width: 520px; }
@@ -60,10 +97,10 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
 .meterRow .name { color: var(--muted); font-size: 12px; }
 .meterRow .nums { grid-column: 2; display: flex; justify-content: space-between; font-size: 12px; }
 /* Meter: the fill carries the state, the track is a lighter step of the same colour. */
-.meter { height: 6px; border-radius: 4px; background: rgba(76,141,255,.18); overflow: hidden; }
+.meter { height: 6px; border-radius: 4px; background: var(--track); overflow: hidden; }
 .meter i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
-.meter.warn { background: rgba(224,168,58,.2); } .meter.warn i { background: var(--warn); }
-.meter.bad { background: rgba(229,96,79,.22); } .meter.bad i { background: var(--bad); }
+.meter.warn { background: var(--track-warn); } .meter.warn i { background: var(--warn); }
+.meter.bad { background: var(--track-bad); } .meter.bad i { background: var(--bad); }
 .vlines { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; display: grid; gap: 4px; font-size: 12px; }
 .vlines .k { color: var(--muted); display: inline-block; width: 74px; }
 .twocol { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 12px; }
@@ -71,7 +108,7 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
 .evt { display: grid; grid-template-columns: 62px 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .evt:last-child { border-bottom: 0; }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-.tabs button.btn.sel { border-color: var(--accent); color: #fff; }
+.tabs button.btn.sel { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 </style>
 </head>
 <body>
@@ -198,8 +235,10 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
       <div class="row" id="attackOptions"></div>
       <div class="row" style="margin-top:8px"><button class="btn" data-post="/api/notify/test">Send a test notification</button></div></div>
     <div class="card"><h2>Storage overflow</h2><div class="row" id="overflowOptions"></div></div>
+    <div class="card"><h2>Appearance</h2><div class="row"><label>Colours <select id="themePick"></select></label></div></div>
     <div class="card"><h2>Daily summary</h2><div class="row" id="dailyOptions"></div></div>
-    <div class="card"><h2>Startup</h2><div class="row" id="startupOptions"></div></div>
+    <div class="card"><h2>Startup</h2><div class="row" id="startupOptions"></div>
+      <div class="row" id="awakeOptions" style="margin-top:8px"></div></div>
     <div class="card"><h2>Session pacing</h2>
       <p class="muted" style="margin-top:0">Play for a while, then close the browser and come back later, like a person would. Outside the active hours the bot stays logged out.</p>
       <div class="row" id="sessionOptions"></div></div>
@@ -234,6 +273,12 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
 
 <script>
 const TOKEN = "__TBOT_TOKEN__";
+const THEMES = [["classic", "Classic dark"], ["amber", "Graphite and amber"], ["midnight", "Midnight blue"], ["parchment", "Parchment (light)"]];
+function applyTheme(name) {
+  if (name && name !== "classic") document.documentElement.dataset.theme = name; else delete document.documentElement.dataset.theme;
+}
+function savedTheme() { try { return localStorage.getItem("tbot-theme"); } catch { return null; } }
+applyTheme(new URLSearchParams(location.search).get("theme") || savedTheme());
 const $ = id => document.getElementById(id);
 let state = null, catalog = null, catalogTribe = null, lastLogId = 0, selectedVillage = null, shownPrompt = null;
 
@@ -320,6 +365,8 @@ function renderStatic() {
   $("heroOptions").innerHTML = [
     numberOption("hero_min_hp_for_adventure", "Minimum HP %", 50, 1, 100),
     selectOption("hero_adventure_pick_order", "Pick", "shortest", [["shortest", "Shortest adventure"], ["top", "First in list"]]),
+    boolOption("hero_adventure_restart_delay_enabled", "Wait a random", true),
+    numberOption("hero_adventure_restart_delay_min_minutes", "", 1, 0, 120), numberOption("hero_adventure_restart_delay_max_minutes", "to", 4, 0, 120), "<span>minutes before sending</span>",
     boolOption("hero_auto_revive", "Revive hero automatically", true),
     boolOption("hero_auto_assign_points", "Spend attribute points", true),
     boolOption("hero_auto_use_ointments", "Use ointments to heal", false),
@@ -362,6 +409,12 @@ function renderStatic() {
     boolOption("construct_faster_random_enabled", "only sometimes", false),
     numberOption("construct_faster_random_chance_percent", "chance %", 50, 1, 100),
     boolOption("turn_off_video_sound", "Mute videos", true)].join("");
+  $("awakeOptions").innerHTML = boolOption("mac_keep_awake", "Keep the Mac awake while the bot runs (closing the lid still puts it to sleep)", true);
+  if (!$("themePick").options.length) {
+    $("themePick").innerHTML = THEMES.map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+    $("themePick").value = document.documentElement.dataset.theme || "classic";
+    $("themePick").onchange = event => { applyTheme(event.target.value); try { localStorage.setItem("tbot-theme", event.target.value); } catch { /* preview only */ } };
+  }
   $("dailyOptions").innerHTML = [
     boolOption("mac_daily_summary_enabled", "Send a notification with the day's results", true),
     numberOption("mac_daily_summary_hour", "at hour", 21, 0, 23)].join("");
@@ -521,7 +574,7 @@ function villageTabs(containerId) {
 }
 
 function describeItem(item) {
-  if (item.type === "resources_all") return `All resource fields (${item.resourceTypes}) to level ${item.targetLevel}`;
+  if (item.type === "resources_all") return `${fieldStepLabel(item.resourceTypes)} to level ${item.targetLevel}`;
   if (item.type === "building_construct") return `Construct ${item.name} in slot ${item.slotId} → level ${item.targetLevel}`;
   if (item.type === "building_max") return `${item.name} (slot ${item.slotId}) → max level`;
   if (item.type === "building_demolish") return `Demolish ${item.name} (slot ${item.slotId}) → level ${item.targetLevel}`;
@@ -585,19 +638,30 @@ function renderBuild() {
 }
 
 let selectedTemplate = null, editingTemplate = null;
+const FIELD_NAMES = { wood: "Woodcutters", clay: "Clay pits", iron: "Iron mines", crop: "Croplands" };
+function fieldStepLabel(types) {
+  const list = String(types || "").split(",").map(t => t.trim()).filter(Boolean);
+  return list.length >= 4 ? "All resource fields" : list.map(t => FIELD_NAMES[t] || t).join(" and ") || "Resource fields";
+}
 function renderTemplateEditor() {
   const box = $("tplEditor"); if (!box) return;
   if (!editingTemplate) { box.innerHTML = ""; return; }
-  const t = editingTemplate;
+  const t = editingTemplate, lastStep = $("tplStepGid")?.value, lastLevel = $("tplStepLevel")?.value;
   box.innerHTML = `<div class="card" style="margin-top:10px"><div class="row"><label>Name <input type="text" id="tplName" value="${esc(t.name)}"></label>
       <span style="flex:1"></span><button class="btn primary" id="btnTplSave">Save template</button><button class="btn" id="btnTplCancel">Close</button></div>
     <table style="margin-top:8px"><tr><th>#</th><th>Step</th><th></th></tr>${t.steps.map((s, i) =>
-      `<tr><td>${i + 1}</td><td>${s.kind === "resources" ? `Resource fields (${esc(s.resourceTypes)}) to level ${s.targetLevel}` : `${esc(s.name)} to level ${s.targetLevel}`}</td>
+      `<tr><td>${i + 1}</td><td>${s.kind === "resources" ? `${esc(fieldStepLabel(s.resourceTypes))} to level ${s.targetLevel}` : `${esc(s.name)} to level ${s.targetLevel}`}</td>
        <td style="white-space:nowrap"><button class="mini" data-tpl-step="up" data-i="${i}">↑</button><button class="mini" data-tpl-step="down" data-i="${i}">↓</button>
          <button class="mini" data-tpl-step="remove" data-i="${i}">✕</button></td></tr>`).join("") || '<tr><td colspan="3" class="muted">No steps yet.</td></tr>'}</table>
-    <div class="row" style="margin-top:8px"><select id="tplStepGid"><option value="">Resource fields (all types)</option>${(catalog?.buildings || []).map(b =>
-        `<option value="${b.gid}" data-name="${esc(b.name)}">${esc(b.name)}</option>`).join("")}</select>
+    <div class="row" style="margin-top:8px"><select id="tplStepGid"><optgroup label="Resource fields">
+        <option value="res:wood,clay,iron,crop">All resource fields</option><option value="res:wood">Woodcutters (wood)</option>
+        <option value="res:clay">Clay pits (clay)</option><option value="res:iron">Iron mines (iron)</option><option value="res:crop">Croplands (crop)</option>
+      </optgroup><optgroup label="Buildings">${(catalog?.buildings || []).map(b =>
+        `<option value="${b.gid}" data-name="${esc(b.name)}">${esc(b.name)}</option>`).join("")}</optgroup></select>
       <label>to level <input type="number" id="tplStepLevel" min="1" max="25" value="5"></label><button class="btn" id="btnTplStepAdd">Add step</button></div></div>`;
+  // Keep the step being composed as it was, so adding several steps in a row does not reset it.
+  if (lastStep) $("tplStepGid").value = lastStep;
+  if (lastLevel) $("tplStepLevel").value = lastLevel;
 }
 
 const TROOP_BUILDINGS = [["barracks", "Barracks"], ["stable", "Stable"], ["workshop", "Workshop"]];
@@ -718,6 +782,34 @@ async function refreshEstimate() {
   try { planEstimates[selectedVillage] = await api("GET", `/api/villages/${encodeURIComponent(selectedVillage)}/plan/estimate`); } catch { /* shown as no estimate */ }
 }
 
+// The page re-renders every 1.5 s. Safari's web view does not focus a dropdown or checkbox when it
+// is used, so "is the user editing?" cannot rely on focus: remember unsaved form values around each
+// re-render instead. Controls that save on change (data-opt and friends) are left to the server state.
+const formKeys = {};
+function keep(containerId, key, render) {
+  const box = $(containerId), same = formKeys[containerId] === key;
+  formKeys[containerId] = key;
+  const byId = {}, ticks = [];
+  if (same) {
+    box.querySelectorAll("input[id], select[id]").forEach(el => { if (!el.dataset.opt) byId[el.id] = el.type === "checkbox" ? el.checked : el.value; });
+    box.querySelectorAll("input[type=checkbox][value]").forEach(el => {
+      const d = el.dataset;
+      if (!el.id && !d.opt && !d.feature && !d.village && d.farm === undefined && !d.startup && !d.troop) ticks.push([el.className, el.value, el.checked]);
+    });
+  }
+  render();
+  for (const [id, value] of Object.entries(byId)) {
+    const el = document.getElementById(id);
+    if (!el || !box.contains(el)) continue;
+    if (el.type === "checkbox") el.checked = value;
+    else if (el.tagName !== "SELECT" || [...el.options].some(option => option.value === value)) el.value = value;
+  }
+  for (const [cls, value, checked] of ticks) {
+    const el = [...box.querySelectorAll("input[type=checkbox][value]")].find(candidate => candidate.className === cls && candidate.value === value);
+    if (el) el.checked = checked;
+  }
+}
+
 let staticRenderedFor = null;
 async function refresh() {
   state = await api("GET", "/api/state");
@@ -725,7 +817,14 @@ async function refresh() {
   const editing = document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
   if (staticRenderedFor !== state.activeAccount || !editing) { renderStatic(); staticRenderedFor = state.activeAccount; }
   await refreshEstimate();
-  renderHeader(); renderDashboard(); renderBuild(); renderTroops(); renderHero(); renderHeroStats(); renderFarming(); renderFarmLoss(); renderRaidState(); renderFarmForms(); renderScan(); renderExpansion(); renderTransfers(); renderCatapults(); renderAccounts(); renderPrompt();
+  renderHeader(); renderDashboard();
+  keep("buildPane", selectedVillage, renderBuild);
+  renderTroops(); renderHero(); renderHeroStats();
+  keep("tab-farming", "", () => { renderFarming(); renderFarmLoss(); renderRaidState(); renderFarmForms(); renderScan(); });
+  keep("tab-expansion", "", renderExpansion);
+  keep("tab-transfers", "", renderTransfers);
+  keep("tab-catapults", "", renderCatapults);
+  renderAccounts(); renderPrompt();
 }
 async function pollLogs() {
   const lines = await api("GET", `/api/logs?after=${lastLogId}`);
@@ -964,8 +1063,9 @@ document.addEventListener("click", async event => {
   if (id === "btnTplStepAdd") {
     const option = $("tplStepGid").selectedOptions[0], level = Number($("tplStepLevel").value) || 1;
     editingTemplate.name = $("tplName").value;
-    editingTemplate.steps.push(option.value ? { kind: "building", gid: Number(option.value), name: option.dataset.name, targetLevel: level, resourceTypes: "" }
-      : { kind: "resources", gid: null, name: "Resource fields", targetLevel: level, resourceTypes: "wood,clay,iron,crop" });
+    editingTemplate.steps.push(option.value.startsWith("res:")
+      ? { kind: "resources", gid: null, name: "Resource fields", targetLevel: level, resourceTypes: option.value.slice(4) }
+      : { kind: "building", gid: Number(option.value), name: option.dataset.name, targetLevel: level, resourceTypes: "" });
     return renderTemplateEditor();
   }
   if (d.tplStep) {
@@ -1036,7 +1136,7 @@ document.addEventListener("click", async event => {
       raid: $("cpRaid").checked, firstAttackTroops: first, waveTroops: wave, target1: $("cpT1").value, target2: $("cpT2").value });
     return refresh();
   }
-  if (d.pick) { selectedVillage = d.pick; document.activeElement?.blur(); renderBuild(); renderTroops(); }
+  if (d.pick) { selectedVillage = d.pick; document.activeElement?.blur(); keep("buildPane", selectedVillage, renderBuild); renderTroops(); }
   else if (d.run) { await api("POST", "/api/jobs/run", { key: d.run }); refresh(); }
   else if (d.prompt !== undefined) { await api("POST", "/api/prompt", { id: state.prompt.id, value: d.prompt }); $("promptDialog").close(); refresh(); }
   else if (d.q) { await api("POST", `/api/villages/${encodeURIComponent(selectedVillage)}/build/${d.id}/${d.q}`); await refresh(); }

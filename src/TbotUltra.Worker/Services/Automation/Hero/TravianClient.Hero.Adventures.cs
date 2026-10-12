@@ -142,6 +142,24 @@ public sealed partial class TravianClient
             quick.IsInVillage,
             quick.Status.IsDead,
             isReviving);
+        if (!dispatched && !quick.Status.IsDead && !isReviving)
+        {
+            // The game often lands back on a village page whose hero widget was rendered before the
+            // send took effect, so a sent adventure reads as "still in the village". Reload once and
+            // read again before reporting that the adventure could not be started.
+            await Task.Delay(1500, cancellationToken);
+            await EnsureFreshDorf1ForHeroAsync(forceReload: true, cancellationToken);
+            quick = await ReadHeroQuickStatusAsync(
+                allowDorf1Fallback: false,
+                forceDorf1Reload: false,
+                cancellationToken);
+            dispatched = HeroStatusDecision.IsAdventureDispatchConfirmed(
+                activeAdventurePage,
+                quick.IsInVillage,
+                quick.Status.IsDead,
+                isReviving);
+        }
+
         if (quick.Status.SecondsUntilReturn is > 0)
         {
             returnSeconds = quick.Status.SecondsUntilReturn.Value;
