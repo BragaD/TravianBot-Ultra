@@ -535,13 +535,17 @@ function renderBuild() {
   if (editingTemplate && $("tplEditor")) return;
   if ($("tplPick")?.value) selectedTemplate = $("tplPick").value;
   const vs = state.settings.villages[village.key] || { buildQueue: [] };
-  const queue = vs.buildQueue.length ? `<table><tr><th>#</th><th>Item</th><th>Status</th><th></th></tr>${vs.buildQueue.map((item, i) =>
-    `<tr><td>${i + 1}</td><td>${esc(describeItem(item))}</td>
+  const estimate = planEstimates[village.key], pendingItems = vs.buildQueue.filter(item => item.status === "pending");
+  const eta = item => { const row = estimate?.items?.[pendingItems.indexOf(item)]; return !row || item.status !== "pending" ? ""
+    : row.blocked ? `<span class="warn" title="${esc(row.blocked)}">cannot estimate</span>` : `<span title="${fmt(row.wood)} wood, ${fmt(row.clay)} clay, ${fmt(row.iron)} iron, ${fmt(row.crop)} crop over ${row.steps} level(s)">${countdown(new Date(Date.now() + row.finishesInSeconds * 1000).toISOString())}</span>`; };
+  const queue = vs.buildQueue.length ? `<table><tr><th>#</th><th>Item</th><th>Done in about</th><th>Status</th><th></th></tr>${vs.buildQueue.map((item, i) =>
+    `<tr><td>${i + 1}</td><td>${esc(describeItem(item))}</td><td style="white-space:nowrap">${eta(item)}</td>
      <td><span class="${item.status === "blocked" ? "bad" : "muted"}">${esc(item.status)}</span> <span class="muted">${esc(item.note)}</span></td>
      <td style="white-space:nowrap">${item.status === "blocked" ? `<button class="mini" data-q="retry" data-id="${item.id}">Retry</button>` : ""}
        <button class="mini" data-q="up" data-id="${item.id}">↑</button><button class="mini" data-q="down" data-id="${item.id}">↓</button>
        <button class="mini" data-q="remove" data-id="${item.id}">✕</button></td></tr>`).join("")}</table>`
     : '<div class="muted">The queue is empty. Add items below — they are built top to bottom.</div>';
+  const estimateNote = estimate?.items?.length && vs.buildQueue.length ? `<p class="muted">Estimate assumes: ${estimate.assumptions.map(esc).join(" ")}</p>` : "";
   const fields = village.fields.map(f => `<option value="${f.slotId}" data-name="${esc(f.name)}">Slot ${f.slotId}: ${esc(f.name)} (level ${f.level ?? "?"})</option>`).join("");
   const empty = village.buildings.filter(b => !b.name || /^empty$/i.test(b.name));
   const built = village.buildings.filter(b => !empty.includes(b) && !/^unknown$/i.test(b.name));
@@ -549,7 +553,7 @@ function renderBuild() {
   const emptySlots = empty.map(b => `<option value="${b.slotId}">Slot ${b.slotId}</option>`).join("");
   const catalogOptions = (catalog?.buildings || []).map(b => `<option value="${b.gid}" data-name="${esc(b.name)}" title="${esc(b.requirements.join(", "))}">${esc(b.name)}</option>`).join("");
   $("buildPane").innerHTML = `
-    <div class="card"><h2>Build queue — ${esc(village.name)}</h2>${queue}</div>
+    <div class="card"><h2>Build queue — ${esc(village.name)}</h2>${queue}${estimateNote}</div>
     <div class="card"><h2>Add to queue</h2>
       <h3>All resource fields</h3>
       <div class="row">${["wood", "clay", "iron", "crop"].map(t => `<label><input type="checkbox" class="resType" value="${t}" checked> ${t}</label>`).join("")}
@@ -702,12 +706,25 @@ function renderPrompt() {
   if (!dialog.open) dialog.showModal();
 }
 
+// Finish-time estimates for the selected village's queue, refreshed when the queue changes.
+const planEstimates = {}; let estimateSignature = "";
+async function refreshEstimate() {
+  if (!selectedVillage) return;
+  const queue = state.settings.villages[selectedVillage]?.buildQueue || [];
+  const signature = `${selectedVillage}|${queue.map(item => item.id + item.status).join(",")}|${Math.floor(Date.now() / 60000)}`;
+  if (signature === estimateSignature) return;
+  estimateSignature = signature;
+  if (!queue.length) { delete planEstimates[selectedVillage]; return; }
+  try { planEstimates[selectedVillage] = await api("GET", `/api/villages/${encodeURIComponent(selectedVillage)}/plan/estimate`); } catch { /* shown as no estimate */ }
+}
+
 let staticRenderedFor = null;
 async function refresh() {
   state = await api("GET", "/api/state");
   if (state.tribe !== catalogTribe) { catalog = await api("GET", "/api/catalog"); catalogTribe = state.tribe; }
   const editing = document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
   if (staticRenderedFor !== state.activeAccount || !editing) { renderStatic(); staticRenderedFor = state.activeAccount; }
+  await refreshEstimate();
   renderHeader(); renderDashboard(); renderBuild(); renderTroops(); renderHero(); renderHeroStats(); renderFarming(); renderFarmLoss(); renderRaidState(); renderFarmForms(); renderScan(); renderExpansion(); renderTransfers(); renderCatapults(); renderAccounts(); renderPrompt();
 }
 async function pollLogs() {

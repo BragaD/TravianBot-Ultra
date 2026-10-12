@@ -61,11 +61,18 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
 
 The game language must be English (Settings → *Set game language to English*).
 
+## Planning
+
+The Building tab shows roughly when each queued item will be done, from today's stock and
+production. Costs are exact; build times start from the standard tables and are corrected from the
+builds the bot watches on your world, so early estimates are rough.
+
 ## AI agents
 
 An agent can read the bot's state and change its tasks and build plans through the app's local
 API. While the app runs, `~/Library/Application Support/TbotUltra/agent/` holds the connection
-details, a state snapshot, a `tbot` command-line helper and the guide; the same guide is in
+details, a state snapshot, a `tbot` command-line helper and the guide. Agents can also ask for the
+cost and build time of any level and for a time estimate of a plan before queueing it. The guide is in
 [docs/AGENT_API.md](../docs/AGENT_API.md).
 
 ## Data

@@ -1317,7 +1317,16 @@ public sealed class BotEngine
 
     private async Task ExecuteJobAsync(AccountEntry account, MacSettings settings, Job job, CancellationToken cancellationToken)
     {
-        await ExecuteJobCoreAsync(account, settings, job, cancellationToken);
+        _workingVillageKey = job.VillageKey;
+        try
+        {
+            await ExecuteJobCoreAsync(account, settings, job, cancellationToken);
+        }
+        finally
+        {
+            _workingVillageKey = null;
+        }
+
         RecordEvent(job.Title, _lastResult.GetValueOrDefault(job.Key, string.Empty));
     }
 
@@ -2231,7 +2240,65 @@ public sealed class BotEngine
         return string.IsNullOrEmpty(value) ? null : value;
     }
 
-    private void Log(string message) => _log.Add(message);
+    private void Log(string message)
+    {
+        _log.Add(message);
+        ObserveBuildTime(message);
+    }
+
+    private string? _workingVillageKey;
+
+    // The engine logs the real duration when it starts a field upgrade
+    // ("click ok — slot=1 'Woodcutter' lvl 3 → 4 queued (duration~113s)"). Comparing it with the
+    // standard table gives the correction this world needs for estimates.
+    private void ObserveBuildTime(string message)
+    {
+        var match = Regex.Match(message, @"click ok — slot=\d+ '(?<name>[^']+)' lvl \d+ → (?<level>\d+) queued \(duration~(?<seconds>\d+)s\)");
+        if (!match.Success || _workingVillageKey is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var accountName = _accounts.ActiveAccountName();
+            var account = _accounts.Find(accountName);
+            VillageView? village;
+            lock (_sync)
+            {
+                _villages.TryGetValue(_workingVillageKey, out village);
+            }
+
+            var gid = BuildingCatalogService.GidForName(match.Groups["name"].Value);
+            if (account is null || village is null || gid is not int id)
+            {
+                return;
+            }
+
+            var speedMatch = Regex.Match(account.ServerUrl, @"[./]x(\d+)\.");
+            var speed = speedMatch.Success ? double.Parse(speedMatch.Groups[1].Value, CultureInfo.InvariantCulture) : 1;
+            var mainBuilding = village.Buildings.FirstOrDefault(building => building.Gid == 15)?.Level ?? 1;
+            var table = BuildingCatalogService.BuildSecondsFor(id, int.Parse(match.Groups["level"].Value, CultureInfo.InvariantCulture), speed, Math.Max(1, mainBuilding));
+            var ratio = table > 0 ? double.Parse(match.Groups["seconds"].Value, CultureInfo.InvariantCulture) / table : 0;
+            if (ratio is < 0.2 or > 3)
+            {
+                return;
+            }
+
+            _settings.Update(accountName, settings =>
+            {
+                settings.BuildTimeSamples.Add(Math.Round(ratio, 3));
+                if (settings.BuildTimeSamples.Count > 20)
+                {
+                    settings.BuildTimeSamples.RemoveRange(0, settings.BuildTimeSamples.Count - 20);
+                }
+            });
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidOperationException or IOException)
+        {
+            // Calibration is a nicety; a log line it cannot use is simply skipped.
+        }
+    }
 
     private static string Shorten(string? text)
     {

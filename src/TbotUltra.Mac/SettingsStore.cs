@@ -94,6 +94,12 @@ public sealed class DailyStats
 
 public sealed class MacSettings
 {
+    /// <summary>
+    /// Observed build time divided by the standard table's, for recent builds. Worlds differ from the
+    /// tables (speed rounding, early-game bonuses), so estimates are scaled by the median of these.
+    /// </summary>
+    public List<double> BuildTimeSamples { get; set; } = [];
+
     /// <summary>Per-day counters keyed by local date (yyyy-MM-dd); the last two weeks are kept.</summary>
     public Dictionary<string, DailyStats> Daily { get; set; } = new(StringComparer.Ordinal);
     public StartupSettings Startup { get; set; } = new();

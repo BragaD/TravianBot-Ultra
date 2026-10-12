@@ -157,14 +157,7 @@ app.MapPut("/api/villages/{key}/build", (string key, QueueReplacement request) =
             item.Note = string.Empty;
             item.StallCount = 0;
             item.TargetLevel = Math.Clamp(item.TargetLevel, 0, 100);
-            if (string.IsNullOrWhiteSpace(item.Name))
-            {
-                item.Name = item.Gid is int gid
-                    ? BuildingCatalogService.NameForGid(gid)
-                    : village.Buildings.FirstOrDefault(building => building.SlotId == item.SlotId)?.Name
-                      ?? village.Fields.FirstOrDefault(field => field.SlotId == item.SlotId)?.Name
-                      ?? "Resource fields";
-            }
+            FillName(item, village);
 
             if (request.Preflight ?? StoragePreflightEnabled(current))
             {
@@ -446,6 +439,54 @@ app.MapPost("/api/villages/{key}/build", (string key, BuildItem item) =>
     return Results.Json(new { item.Id, notes });
 });
 
+// Planning data: what each level costs and how long it takes in a given village.
+app.MapGet("/api/planning/costs", (int gid, int? from, int? to, string? villageKey) =>
+{
+    var account = RequireAccount();
+    var village = villageKey is null ? engine.Villages(account).FirstOrDefault() : RequireVillageView(account, villageKey);
+    var mainBuilding = village?.Buildings.FirstOrDefault(building => building.Gid == 15)?.Level ?? 1;
+    var current = village?.Buildings.Where(building => building.Gid == gid).Select(building => building.Level ?? 0).DefaultIfEmpty(0).Max() ?? 0;
+    var fromLevel = from ?? current;
+    return Results.Json(new
+    {
+        gid,
+        name = BuildingCatalogService.NameForGid(gid),
+        maxLevel = BuildingCatalogService.MaxLevelFor(gid),
+        currentLevel = current,
+        serverSpeed = ServerSpeed(account),
+        mainBuildingLevel = mainBuilding,
+        requirements = BuildingCatalogService.RequirementsFor(gid).Select(requirement => new { requirement.Name, requirement.Level }),
+        buildTimeFactor = BuildPlanner.TimeFactor(settings.Load(account).BuildTimeSamples),
+        buildTimeSamples = settings.Load(account).BuildTimeSamples.Count,
+        levels = BuildPlanner.Costs(
+            gid, fromLevel, to ?? BuildingCatalogService.MaxLevelFor(gid), ServerSpeed(account), mainBuilding,
+            BuildPlanner.TimeFactor(settings.Load(account).BuildTimeSamples)),
+    });
+});
+
+// How long the current queue (GET) or a proposed list of items (POST) would take in this village.
+app.MapGet("/api/villages/{key}/plan/estimate", (string key) =>
+{
+    var account = RequireAccount();
+    var current = settings.Load(account);
+    var queue = RequireVillage(current, key).BuildQueue.Where(item => item.Status == "pending").ToList();
+    return Results.Json(BuildPlanner.Estimate(
+        RequireVillageView(account, key), queue, ServerSpeed(account), BuildPlanner.TimeFactor(current.BuildTimeSamples), current.BuildTimeSamples.Count));
+});
+
+app.MapPost("/api/villages/{key}/plan/estimate", (string key, QueueReplacement request) =>
+{
+    var account = RequireAccount();
+    var village = RequireVillageView(account, key);
+    var samples = settings.Load(account).BuildTimeSamples;
+    foreach (var item in request.Items ?? [])
+    {
+        FillName(item, village);
+    }
+
+    return Results.Json(BuildPlanner.Estimate(village, request.Items ?? [], ServerSpeed(account), BuildPlanner.TimeFactor(samples), samples.Count));
+});
+
 app.MapPut("/api/templates", (BuildTemplate template) =>
 {
     template.Id = string.IsNullOrWhiteSpace(template.Id) ? Guid.NewGuid().ToString("N")[..10] : template.Id;
@@ -693,6 +734,26 @@ string RequireAccount()
 {
     var name = accounts.ActiveAccountName();
     return name.Length > 0 ? name : throw new InvalidOperationException("Add an account first.");
+}
+
+// Speed worlds carry their multiplier in the host name, e.g. "rog.x10.international.travian.com".
+double ServerSpeed(string account)
+{
+    var match = System.Text.RegularExpressions.Regex.Match(accounts.Find(account)?.ServerUrl ?? string.Empty, @"[./]x(\d+)\.");
+    return match.Success && int.TryParse(match.Groups[1].Value, out var speed) && speed > 0 ? speed : 1;
+}
+
+// Agents may leave the name out; the app works it out from the gid or the slot.
+static void FillName(BuildItem item, VillageView village)
+{
+    if (string.IsNullOrWhiteSpace(item.Name))
+    {
+        item.Name = item.Gid is int gid
+            ? BuildingCatalogService.NameForGid(gid)
+            : (item.SlotId is <= 18 ? village.Fields.FirstOrDefault(field => field.SlotId == item.SlotId)?.Name : null)
+              ?? village.Buildings.FirstOrDefault(building => building.SlotId == item.SlotId)?.Name
+              ?? "Resource fields";
+    }
 }
 
 VillageView RequireVillageView(string account, string key)

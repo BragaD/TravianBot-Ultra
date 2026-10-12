@@ -23,6 +23,22 @@ public sealed class BuildTemplate
 
 public sealed record PlanResult(List<BuildItem> Items, List<string> Notes);
 
+public sealed record LevelCost(int Level, int Wood, int Clay, int Iron, int Crop, int UpkeepTotal, int CulturePoints, int BuildSeconds);
+
+public sealed record ItemEstimate(
+    string Description,
+    int Steps,
+    long Wood,
+    long Clay,
+    long Iron,
+    long Crop,
+    int WaitForResourcesSeconds,
+    int BuildSeconds,
+    int FinishesInSeconds,
+    string? Blocked);
+
+public sealed record PlanEstimate(List<ItemEstimate> Items, int TotalSeconds, DateTimeOffset? FinishesAtUtc, List<string> Assumptions);
+
 /// <summary>Reusable build orders, shared by every account on this Mac.</summary>
 public sealed class TemplateStore
 {
@@ -285,6 +301,139 @@ public static class BuildPlanner
 
     // UI text is English, so numbers are too, whatever the Mac's region is.
     private static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    /// <summary>Median of the observed/table build-time ratios; 1 when nothing has been observed.</summary>
+    public static double TimeFactor(IReadOnlyList<double> samples)
+    {
+        if (samples.Count == 0)
+        {
+            return 1;
+        }
+
+        var sorted = samples.OrderBy(value => value).ToList();
+        return sorted.Count % 2 == 1 ? sorted[sorted.Count / 2] : (sorted[(sorted.Count / 2) - 1] + sorted[sorted.Count / 2]) / 2;
+    }
+
+    /// <summary>Cost and build time of each level of one building type, for this village's Main Building.</summary>
+    public static List<LevelCost> Costs(int gid, int fromLevel, int toLevel, double serverSpeed, int mainBuildingLevel, double timeFactor = 1)
+    {
+        var result = new List<LevelCost>();
+        for (var level = Math.Max(1, fromLevel + 1); level <= Math.Min(toLevel, BuildingCatalogService.MaxLevelFor(gid)); level++)
+        {
+            if (BuildingCatalogService.CostFor(gid, level) is { } cost)
+            {
+                result.Add(new LevelCost(
+                    level, cost.Wood, cost.Clay, cost.Iron, cost.Crop, cost.Upkeep, cost.CulturePoints,
+                    (int)Math.Ceiling(BuildingCatalogService.BuildSecondsFor(gid, level, serverSpeed, Math.Max(1, mainBuildingLevel)) * timeFactor)));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Walks a list of build items one level at a time against the village's stock and production:
+    /// wait until the level is affordable, pay, build, repeat. One thing is built at a time.
+    /// </summary>
+    public static PlanEstimate Estimate(VillageView village, IReadOnlyList<BuildItem> items, double serverSpeed, double timeFactor = 1, int timeSamples = 0)
+    {
+        var assumptions = new List<string>
+        {
+            timeSamples > 0
+                ? $"Build times use the standard tables corrected by ×{timeFactor.ToString("0.##", CultureInfo.InvariantCulture)}, learned from {timeSamples} build(s) seen on this world."
+                : "Build times use the standard tables; they are corrected once the bot has watched a few builds on this world.",
+            "One construction at a time (no second build slot).",
+            "Production stays at today's rate; field upgrades in the plan would make it faster.",
+            "No resources spent on troops, and none added by raids, the hero or trades.",
+        };
+        var stockEntries = village.Stock ?? [];
+        if (stockEntries.Count == 0 || village.UpdatedUtc is null)
+        {
+            return new PlanEstimate([], 0, null, ["The village's stock and production have not been read yet. Scan the village first."]);
+        }
+
+        string[] names = ["wood", "clay", "iron", "crop"];
+        var hoursSinceRead = Math.Max(0, (DateTimeOffset.UtcNow - village.UpdatedUtc.Value).TotalHours);
+        var perHour = names.Select(name => stockEntries.FirstOrDefault(entry => entry.Resource == name)?.PerHour ?? 0).ToArray();
+        var capacity = names.Select(name => (double)(stockEntries.FirstOrDefault(entry => entry.Resource == name)?.Capacity
+            ?? (name == "crop" ? village.Granary : village.Warehouse) ?? 0)).ToArray();
+        var stock = names.Select((name, index) => Math.Min(
+            capacity[index],
+            (stockEntries.FirstOrDefault(entry => entry.Resource == name)?.Current ?? 0) + (perHour[index] * hoursSinceRead))).ToArray();
+
+        var state = new Projection(village, []);
+        var estimates = new List<ItemEstimate>();
+        double clock = 0;
+        foreach (var item in items)
+        {
+            long wood = 0, clay = 0, iron = 0, crop = 0;
+            double waited = 0, built = 0;
+            var steps = 0;
+            string? blocked = item.Type == "building_demolish" ? "Demolition is not estimated." : null;
+            foreach (var (gid, from, to) in blocked is null ? LevelRanges(village, state, item) : [])
+            {
+                for (var level = from + 1; level <= to && blocked is null; level++)
+                {
+                    if (BuildingCatalogService.CostFor(gid, level) is not { } cost)
+                    {
+                        break;
+                    }
+
+                    double[] price = [cost.Wood, cost.Clay, cost.Iron, cost.Crop];
+                    double wait = 0;
+                    for (var index = 0; index < 4 && blocked is null; index++)
+                    {
+                        if (price[index] > capacity[index])
+                        {
+                            blocked = $"Level {level} costs {Number((long)price[index])} {names[index]}, more than storage holds ({Number((long)capacity[index])}).";
+                        }
+                        else if (price[index] > stock[index])
+                        {
+                            if (perHour[index] <= 0)
+                            {
+                                blocked = $"Not enough {names[index]} for level {level} and none is being produced.";
+                            }
+                            else
+                            {
+                                wait = Math.Max(wait, (price[index] - stock[index]) / perHour[index] * 3600);
+                            }
+                        }
+                    }
+
+                    if (blocked is not null)
+                    {
+                        break;
+                    }
+
+                    var duration = BuildingCatalogService.BuildSecondsFor(gid, level, serverSpeed, Math.Max(1, state.Buildings.GetValueOrDefault(15).Level)) * timeFactor;
+                    for (var index = 0; index < 4; index++)
+                    {
+                        stock[index] = Math.Min(capacity[index], stock[index] + (perHour[index] * wait / 3600)) - price[index];
+                        stock[index] = Math.Min(capacity[index], stock[index] + (perHour[index] * duration / 3600));
+                    }
+
+                    waited += wait;
+                    built += duration;
+                    steps++;
+                    wood += cost.Wood;
+                    clay += cost.Clay;
+                    iron += cost.Iron;
+                    crop += cost.Crop;
+                }
+            }
+
+            clock += waited + built;
+            state.Apply(item);
+            estimates.Add(new ItemEstimate(
+                BotEngine.DescribeBuildItem(item), steps, wood, clay, iron, crop, (int)Math.Ceiling(waited), (int)Math.Ceiling(built), (int)Math.Ceiling(clock), blocked));
+            if (blocked is not null)
+            {
+                assumptions.Add("Items after a blocked one are estimated as if it were skipped.");
+            }
+        }
+
+        return new PlanEstimate(estimates, (int)Math.Ceiling(clock), DateTimeOffset.UtcNow.AddSeconds(clock), assumptions.Distinct().ToList());
+    }
 
     /// <summary>
     /// Crop check for one item: how much crop per hour the village will have left once everything

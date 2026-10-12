@@ -221,14 +221,62 @@ anything already at the target level is skipped.
 A step is `{"kind":"resources","targetLevel":5,"resourceTypes":"wood,clay,iron,crop"}` or
 `{"kind":"building","gid":15,"name":"Main Building","targetLevel":10}`.
 
+### Costs, build times and estimates
+
+Use these to plan towards a goal instead of guessing.
+
+**`GET /api/planning/costs?gid=15&villageKey=xy:95%7C80`** — every remaining level of one building
+type. Optional `from` and `to` pick a level range (default: from the village's current level to the
+maximum). Field types are gid 1 wood, 2 clay, 3 iron, 4 crop.
+
+```jsonc
+{ "gid": 15, "name": "Main Building", "maxLevel": 20, "currentLevel": 11,
+  "serverSpeed": 10, "mainBuildingLevel": 11,
+  "buildTimeFactor": 0.61, "buildTimeSamples": 8,   // correction learned from real builds here
+  "requirements": [],
+  "levels": [{ "level": 12, "wood": 1060, "clay": 605, "iron": 910, "crop": 305,
+               "upkeepTotal": 18,        // crop per hour the building eats at this level, in total
+               "culturePoints": 12,      // culture points per day at this level
+               "buildSeconds": 2030 }] } // on this world, with this village's Main Building
+```
+
+**`POST /api/villages/{key}/plan/estimate`** with `{"items":[…]}` (same item shape as the queue)
+estimates a plan **without queueing it**. `GET` on the same path estimates the pending queue.
+
+```jsonc
+{ "items": [{ "description": "Main Building (slot 26) to level 13", "steps": 2,
+              "wood": 2415, "clay": 1380, "iron": 2075, "crop": 695,
+              "waitForResourcesSeconds": 0, "buildSeconds": 4410,
+              "finishesInSeconds": 4410,     // from now, cumulative over the plan
+              "blocked": null }],            // or why a level can never be paid for
+  "totalSeconds": 4410, "finishesAtUtc": "…",
+  "assumptions": ["One construction at a time (no second build slot).", "…"] }
+```
+
+Costs are exact. Build times start from the standard tables, which some worlds do not follow, so
+the app records the real duration each time it starts a field upgrade and scales the tables by the
+median ratio (`buildTimeFactor`). With `buildTimeSamples` at 0 treat times as rough.
+
+The estimate walks the plan one level at a time: wait until the level is affordable from today's
+stock and production, pay, build, repeat. Read `assumptions`; real play is usually a little faster
+(a second build slot, rising production) and slower when troops are being trained from the same
+stock. A `blocked` item names the problem, most often a level that costs more than storage holds —
+add a Warehouse or Granary upgrade before it (preflight does this when you queue).
+
+**Planning towards a goal.** A workable loop for "reach X as fast as possible":
+
+1. Read the summary for stock, production, `emptySlots` and current levels.
+2. List candidate plans (for example: fields first, then the building; or the reverse).
+3. `POST …/plan/estimate` each one and compare `totalSeconds`.
+4. `PUT …/build` the best plan with `"preflight": true`, then read the returned `notes`.
+5. Re-estimate with `GET …/plan/estimate` on later visits and re-plan if it has drifted.
+
 ### Planning facts the bot does not work out for you
 
-- **Prerequisites.** `GET /api/catalog` lists each building's `requirements`. If they are not met
-  the item waits; put the prerequisite earlier in the queue.
+- **Prerequisites.** `GET /api/catalog` and `GET /api/planning/costs` list each building's
+  `requirements`. If they are not met the item waits; put the prerequisite earlier in the queue.
 - **Build slots.** Normally one field and one building at a time (two in total with Travian Plus;
   Romans build a field and a building in parallel). The bot waits for a free slot.
-- **Cost.** Costs per level are not in the API. Treat `notes` from preflight as the signal that an
-  item is expensive for the current storage.
 
 ## 6. Change what the bot does
 
