@@ -38,7 +38,9 @@ public sealed record VillageView(
     List<TrainingView>? Training = null,
     int? Population = null,
     // Hourly production (wood, clay, iron, crop) as last read while the hero was alive.
-    List<double>? ProductionWithHero = null);
+    List<double>? ProductionWithHero = null,
+    // The game's "free crop for further buildings": crop left after population and troops, hero not counted.
+    int? FreeCrop = null);
 
 public sealed record AccountView(int? Gold, int? Silver, int UnreadMessages, int UnreadReports, DateTimeOffset UpdatedUtc);
 
@@ -755,6 +757,7 @@ public sealed class BotEngine
                 SendDailySummaryIfDue(account.Name, settings);
                 GuardAgainstOverflow(account.Name, settings);
                 WatchCropBalance(account.Name, settings);
+                KeepCropForQueue(account, settings);
                 var jobs = BuildJobs(settings, account.Name);
                 var now = DateTimeOffset.UtcNow;
                 Job? next;
@@ -1196,6 +1199,66 @@ public sealed class BotEngine
             {
                 Notify("Tbot Ultra — crop is running out", text);
             }
+        }
+    }
+
+    internal static double WorldSpeed(string? serverUrl)
+    {
+        var match = Regex.Match(serverUrl ?? string.Empty, @"[./]x(\d+)\.");
+        return match.Success ? double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture) : 1;
+    }
+
+    // When the next build in a village's queue needs more crop than the game's "free crop for further
+    // buildings" (which leaves out the hero's production), a cropland level is put in front of it.
+    // This repeats, one level at a time, until the build fits.
+    private void KeepCropForQueue(AccountEntry account, MacSettings settings)
+    {
+        if (!settings.Features.Construction || !OptionOn(settings, "mac_auto_cropland"))
+        {
+            return;
+        }
+
+        foreach (var village in Villages(account.Name))
+        {
+            if (!settings.Villages.TryGetValue(village.Key, out var villageSettings) || !villageSettings.Enabled
+                || villageSettings.BuildQueue.FirstOrDefault(item => item.Status == "pending") is not { } head
+                || village.Constructions.Any(item => string.Equals(item.Name, "Cropland", StringComparison.OrdinalIgnoreCase))
+                || BuildPlanner.NextStepUpkeep(village, head) is not { Upkeep: > 0 } step
+                || village.FreeCrop is not { } freeCrop
+                || freeCrop - step.Upkeep >= 0)
+            {
+                continue;
+            }
+
+            var maxFieldLevel = village.IsCapital == true ? 20 : 10;
+            var cropland = village.Fields
+                .Where(field => field.SlotId is not null && string.Equals(field.Type, "crop", StringComparison.OrdinalIgnoreCase) && (field.Level ?? 0) < maxFieldLevel)
+                .OrderBy(field => field.Level ?? 0)
+                .FirstOrDefault();
+            if (cropland is null)
+            {
+                continue;
+            }
+
+            var level = (cropland.Level ?? 0) + 1;
+            var reason = $"{step.Step} needs {step.Upkeep} crop per hour and the village has {freeCrop} free";
+            _settings.Update(account.Name, current =>
+            {
+                if (current.Villages.TryGetValue(village.Key, out var entry)
+                    && entry.BuildQueue.FirstOrDefault(item => item.Status == "pending")?.Id == head.Id)
+                {
+                    entry.BuildQueue.Insert(entry.BuildQueue.FindIndex(item => item.Id == head.Id), new BuildItem
+                    {
+                        Type = "resource_field",
+                        SlotId = cropland.SlotId,
+                        Name = cropland.Name,
+                        TargetLevel = level,
+                        Note = $"Added automatically: {reason}.",
+                    });
+                }
+            });
+            Log($"[mac] {village.Name}: queued Cropland (slot {cropland.SlotId}) to level {level} first — {reason}.");
+            RecordEvent($"Cropland queued in {village.Name}", $"Level {level} in slot {cropland.SlotId}: {reason}.");
         }
     }
 
@@ -2207,6 +2270,7 @@ public sealed class BotEngine
                         : active.Training,
                     Population = status.Villages.FirstOrDefault(item => string.Equals(item.Name, active.Name, StringComparison.OrdinalIgnoreCase))?.Population
                         ?? active.Population,
+                    FreeCrop = status.FreeCrop ?? active.FreeCrop,
                     UpdatedUtc = DateTimeOffset.UtcNow,
                 };
 

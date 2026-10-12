@@ -192,7 +192,8 @@ public sealed partial class TravianClient
             IncomingAttackActiveVillageReadWasAuthoritative: incomingAttackActiveVillageReadWasAuthoritative,
             IncomingAttackPlusOverviewWasRead: incomingAttackSignalRead?.PlusOverviewWasRead == true,
             HasTroopsAtHome: hasTroopsAtHome,
-            TroopPresenceObservedAtUtc: hasTroopsAtHome.HasValue ? CurrentTravianServerTimeUtc() : null);
+            TroopPresenceObservedAtUtc: hasTroopsAtHome.HasValue ? CurrentTravianServerTimeUtc() : null,
+            FreeCrop: await ReadFreeCropFromCurrentPageAsync());
         trace.Complete(
             "success",
             $"village={result.ActiveVillage} resources={result.Resources.Count} fields={result.ResourceFields.Count} buildings={result.Buildings.Count} queue={result.BuildQueue.Count} activeConstructions={result.ActiveConstructions?.Count ?? 0}");

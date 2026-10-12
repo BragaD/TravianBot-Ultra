@@ -681,6 +681,7 @@ object BuildSummary()
                 village.UpdatedUtc,
                 stock = village.Stock,
                 cropBalancePerHour = village.Stock?.FirstOrDefault(entry => entry.Resource == "crop")?.PerHour,
+                freeCrop = village.FreeCrop,
                 warehouseCapacity = village.Warehouse,
                 granaryCapacity = village.Granary,
                 fields = village.Fields,
@@ -765,11 +766,7 @@ long[]? HeroResources(MacSettings current)
     return allowed && engine.Hero?.Inventory is { } inventory ? [inventory.Wood, inventory.Clay, inventory.Iron, inventory.Crop] : null;
 }
 
-double ServerSpeed(string account)
-{
-    var match = System.Text.RegularExpressions.Regex.Match(accounts.Find(account)?.ServerUrl ?? string.Empty, @"[./]x(\d+)\.");
-    return match.Success && int.TryParse(match.Groups[1].Value, out var speed) && speed > 0 ? speed : 1;
-}
+double ServerSpeed(string account) => BotEngine.WorldSpeed(accounts.Find(account)?.ServerUrl);
 
 // Agents may leave the name out; the app works it out from the gid or the slot.
 static void FillName(BuildItem item, VillageView village)

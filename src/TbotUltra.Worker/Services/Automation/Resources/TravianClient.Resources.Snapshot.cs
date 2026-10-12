@@ -103,6 +103,7 @@ public sealed partial class TravianClient
             WarehouseCapacity: capacities.Warehouse,
             GranaryCapacity: capacities.Granary,
             ResourceStorageForecasts: forecasts,
+            FreeCrop: await ReadFreeCropFromCurrentPageAsync(),
             ActiveConstructions: activeConstructions,
             BuildQueueFinish: remaining is > 0 ? TimerSnapshot.FromRemaining(remaining.Value) : null,
             ActiveConstructionsFromOverview: _lastActiveConstructionsFromOverview,
@@ -372,6 +373,7 @@ public sealed partial class TravianClient
             WarehouseCapacity: capacities.Warehouse,
             GranaryCapacity: capacities.Granary,
             ResourceStorageForecasts: forecasts,
+            FreeCrop: await ReadFreeCropFromCurrentPageAsync(),
             AdventureCount: adventureCount,
             ActiveConstructions: activeConstructions,
             BuildQueueFinish: remaining is > 0 ? TimerSnapshot.FromRemaining(remaining.Value) : null,
@@ -1016,4 +1018,20 @@ public sealed partial class TravianClient
         }
     }
 
+
+    // The stock bar's free crop value; every game page shows it.
+    private async Task<int?> ReadFreeCropFromCurrentPageAsync()
+    {
+        try
+        {
+            var text = await _page.EvaluateAsync<string?>(
+                "() => { const node = document.querySelector('#stockBarFreeCrop'); return node ? node.textContent : null; }");
+            var digits = new string((text ?? string.Empty).Where(ch => char.IsDigit(ch) || ch == '-' || ch == '\u2212').ToArray()).Replace('\u2212', '-');
+            return int.TryParse(digits, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : null;
+        }
+        catch (Microsoft.Playwright.PlaywrightException)
+        {
+            return null;
+        }
+    }
 }

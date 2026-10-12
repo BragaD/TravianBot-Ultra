@@ -92,6 +92,7 @@ change anything this way; changes need the HTTP API.
     "stock": [{ "resource": "wood", "current": 4528, "capacity": 6300,
                 "perHour": 3790, "fullAtUtc": "…" }, …],
     "cropBalancePerHour": 1853,   // crop per hour after upkeep; negative means troops will starve
+    "freeCrop": 312,              // the game's "free crop for further buildings": hero production not counted
     "warehouseCapacity": 6300, "granaryCapacity": 1700,
     "fields":    [{ "slotId": 1, "type": "wood", "name": "Woodcutter", "level": 6 }, …],
     "buildings": [{ "slotId": 26, "name": "Main Building", "level": 11, "gid": 15 }, …],
@@ -326,6 +327,7 @@ Current values are `settings.options` in `GET /api/state`; anything not listed t
 | `hero_stat_maximums` | e.g. `resources=100,fighting_strength=50,…` | Cap per attribute. |
 | `resource_build_strategy` | `lowest_first` \| `smart` | Field order for `resources_all`. |
 | `mac_storage_preflight` | `true`/`false` | Auto-insert storage upgrades when queueing. |
+| `mac_auto_cropland` | `true`/`false` | While running: when the next level of a village's first queue item needs more crop than the village's free crop (`freeCrop`, the game's "free crop for further buildings"), put one cropland level (lowest field) in front of it; repeats until it fits. Such items carry a note starting "Added automatically". |
 | `continuous_farm_dispatch_delay_min_minutes` / `_max_minutes` | minutes | Farm round interval. |
 | `continuous_farm_deactivate_red_losses` / `_yellow_losses` | `true`/`false` | Put targets on hold after total / partial losses. |
 | `mac_pacing_enabled` | `true`/`false` | Take breaks (close the browser, come back later). |

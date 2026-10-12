@@ -66,6 +66,7 @@ public static class MacDefaults
         ["reinforcements_send_max_minutes"] = "120",
 
         ["mac_storage_preflight"] = "true",
+        ["mac_auto_cropland"] = "true",
 
         // Under attack: what to do shortly before a hit lands.
         ["mac_attack_notify"] = "true",

@@ -339,7 +339,10 @@ public sealed record VillageStatus(
     DateTimeOffset? TroopPresenceObservedAtUtc = null,
     // Current-page observation captured by the jitter resource read. Null means the page did not
     // expose an authoritative Plus marker, so consumers must retain their last known state.
-    bool? TravianPlusActive = null);
+    bool? TravianPlusActive = null,
+    // "Free crop for further buildings" from the stock bar: crop production left after population and
+    // troops, without what the hero adds. Null when the page did not show it.
+    int? FreeCrop = null);
 
 public enum IncomingAttackMovementType
 {

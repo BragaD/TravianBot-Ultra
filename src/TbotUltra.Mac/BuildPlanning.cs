@@ -517,7 +517,8 @@ public static class BuildPlanner
     /// </summary>
     public static string? CropWarning(VillageView village, IReadOnlyList<BuildItem> queue, BuildItem item)
     {
-        var cropPerHour = village.Stock?.FirstOrDefault(entry => entry.Resource == "crop")?.PerHour;
+        // The game's free crop leaves out the hero's production; fall back to the crop balance.
+        var cropPerHour = village.FreeCrop ?? village.Stock?.FirstOrDefault(entry => entry.Resource == "crop")?.PerHour;
         if (cropPerHour is null || item.Type == "building_demolish")
         {
             return null;
@@ -540,7 +541,30 @@ public static class BuildPlanner
 
         return $"Crop warning: {BotEngine.DescribeBuildItem(item)} adds {Number(own)} crop per hour of upkeep"
             + (queued > 0 ? $" on top of {Number(queued)} already queued" : string.Empty)
-            + $". The village makes {Number((long)cropPerHour.Value)} per hour, so it would end about {Number((long)-left)} per hour short. Queue cropland first.";
+            + $". The village has {Number((long)cropPerHour.Value)} free crop, so it would end about {Number((long)-left)} per hour short. Queue cropland first.";
+    }
+
+    /// <summary>Crop per hour the next level of this item will eat, and what that level is.</summary>
+    public static (long Upkeep, string Step)? NextStepUpkeep(VillageView village, BuildItem item)
+    {
+        if (item.Type == "building_demolish")
+        {
+            return null;
+        }
+
+        village = WithRunningConstructions(village);
+        var next = LevelRanges(village, new Projection(village, []), item)
+            .Where(range => range.To > range.From)
+            .OrderBy(range => range.From)
+            .Select(range => ((int Gid, int From, int To)?)range)
+            .FirstOrDefault();
+        if (next is not { } step || step.Gid == 4)
+        {
+            return null; // nothing left to build, or cropland, which adds crop
+        }
+
+        var upkeep = BuildingCatalogService.AdditionalUpkeepForUpgrade(step.Gid, step.From, step.From + 1) ?? 0;
+        return (upkeep, $"{BuildingCatalogService.NameForGid(step.Gid)} level {step.From + 1}");
     }
 
     private static long Upkeep(VillageView village, Projection state, BuildItem item)

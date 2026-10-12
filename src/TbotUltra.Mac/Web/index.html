@@ -385,7 +385,8 @@ function renderStatic() {
   $("constructionOptions").innerHTML = [
     selectOption("resource_build_strategy", "Resource field order", "lowest_first", [["lowest_first", "Lowest level first"], ["smart", "Smart (by need)"]]),
     boolOption("construction_humanize_delay_enabled", "Random delay before queueing the next build", true),
-    boolOption("mac_storage_preflight", "Add the Warehouse/Granary upgrades a build needs", true)].join("");
+    boolOption("mac_storage_preflight", "Add the Warehouse/Granary upgrades a build needs", true),
+    boolOption("mac_auto_cropland", "Upgrade cropland first when the next build needs more free crop than the village has", true)].join("");
   $("heroVideoOptions").innerHTML = [
     boolOption("increase_adventures_to_hard", "Raise adventures to hard before sending", false),
     boolOption("reduce_adventure_time", "Shorten adventure time by 25%", false),

@@ -26,7 +26,8 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
      a building to a level or to its maximum, construct a new one, or demolish one. Items run top to
      bottom. When an item costs more than the Warehouse or Granary can hold, the storage upgrade it
      needs is queued in front of it, and you are warned when the queued upkeep would push the crop
-     balance below zero. Building templates are reusable build orders you can apply to
+     balance below zero. If the next build needs more crop than the game's "free crop for
+     further buildings", a cropland upgrade is put in front of it automatically. Building templates are reusable build orders you can apply to
      any village; a template step can raise all fields or one resource type (wood, clay, iron
      or crop).
    - **Hero** — adventures (minimum HP, shortest/first), auto-revive, healing with ointments, the
