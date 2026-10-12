@@ -162,6 +162,9 @@ dialog::backdrop { background: rgba(0,0,0,.55); }
   <section id="tab-expansion">
     <div class="tiles" id="cultureTiles"></div>
     <div class="card" style="margin-top:12px"><h2>What a new village needs</h2><div id="expansionChecklist" class="muted">Log in to check.</div></div>
+    <div class="card"><h2>Town Hall celebrations</h2>
+      <p class="muted" style="margin-top:0">A celebration spends resources to earn culture points. Tick the villages that have a Town Hall; the bot holds celebrations there on its own.</p>
+      <div class="row" id="celebrationOptions"></div><div id="celebrationState" class="muted" style="margin-top:8px"></div></div>
     <div class="card"><div class="row"><h2 style="margin:0;flex:1">Places to settle</h2>
         <label>around <select id="spotVillage"></select></label><label>radius <input type="number" id="spotRadius" min="1" max="40" value="12"></label>
         <label><input type="checkbox" id="spotCroppers"> croppers only</label><button class="btn" id="btnSpots">Search the map</button></div>
@@ -804,6 +807,16 @@ function renderExpansion() {
       <div class="row" style="margin-top:10px"><button class="btn" data-prepare="${esc(village.key)}" ${seat && seat.level >= 10 ? "disabled" : ""}>Queue what ${esc(village.name)} needs for settlers</button>
         <button class="mini" data-post="/api/expansion/culture">Refresh culture points</button></div>`;
   }
+  if (!editingIn("celebrationOptions")) {
+    $("celebrationOptions").innerHTML = [
+      `<label><input type="checkbox" data-feature="townHall" ${state.settings.features.townHall ? "checked" : ""}> Hold celebrations</label>`,
+      selectOption("town_hall_celebration_mode", "", "small", [["small", "Small celebration"], ["big", "Great celebration"]]),
+      boolOption("mac_celebrate_only_when_cp_short", "only while culture points are short for the next village", true),
+      ...state.villages.map(v => `<label><input type="checkbox" data-village="${esc(v.key)}" data-village-field="townHall" ${state.settings.villages[v.key]?.townHall ? "checked" : ""}> ${esc(v.name)}${v.buildings.some(b => b.gid === 24) ? "" : ' <span class="muted">(no Town Hall yet)</span>'}</label>`)].join("");
+  }
+  $("celebrationState").textContent = !state.settings.features.townHall ? "Celebrations are switched off."
+    : state.celebrationsWanted ? "Celebrations run in the ticked villages: culture points are still needed (or have not been read yet)."
+    : "Celebrations are paused: there are enough culture points for the next village.";
   const spots = (state.settleSpots || []).filter(s => !$("spotCroppers").checked || /cropper/.test(s.kind));
   $("spotRows").innerHTML = (state.settleSpots || []).length ? `<table><tr><th>Coordinates</th><th>Distance</th><th>Fields (wood-clay-iron-crop)</th><th>Type</th></tr>${spots.slice(0, 150).map(s =>
     `<tr><td>${s.x}|${s.y}</td><td>${s.distance}</td><td>${esc(s.layout)}</td><td>${/cropper/.test(s.kind) ? `<b>${esc(s.kind)}</b>` : esc(s.kind)}</td></tr>`).join("")}</table>

@@ -115,6 +115,7 @@ change anything this way; changes need the HTTP API.
   "expansion": { "culturePoints": { "usedSlots": 1, "maxVillages": 1, "produced": 88,
                                     "needed": 200, "perDay": 51, "updatedUtc": "…" },
                  "slotFree": false,                 // may a new village be founded right now?
+                 "celebrationsWanted": true,        // false = celebrations paused: enough culture points
                  "enoughCulturePointsAtUtc": "…",    // null when there are already enough
                  "settleSpots": [{ "x": 91, "y": 77, "layout": "1-1-1-15",
                                    "kind": "15 cropper", "distance": 5.0 }] },   // after a search
@@ -276,6 +277,7 @@ Current values are `settings.options` in `GET /api/state`; anything not listed t
 | `mac_attack_notify` | `true`/`false` | macOS notification when a new attack is seen. |
 | `mac_attack_spend_enabled`, `mac_attack_spend_lead_minutes` | `true`/`false`, minutes | Run the village's build and training jobs this long before a hit, so less can be plundered. |
 | `mac_evasion_enabled`, `mac_evasion_target`, `mac_evasion_lead_minutes`, `mac_evasion_include_hero` | `true`/`false`, `"x\|y"`, minutes, `true`/`false` | Shortly before a hit, send all troops on a raid to the target, timed to return after it. **Sends an attack**: see section 9. |
+| `mac_celebrate_only_when_cp_short`, `town_hall_celebration_mode` | `true`/`false`, `small` \| `big` | Hold Town Hall celebrations only while culture points are short for the next village; which celebration to hold. Needs the `townHall` feature and `townHall: true` on the village. |
 | `mac_raid_sizing_enabled` | `true`/`false` | Without Gold Club: scale a target's raid up 25% when the last raid came home full, down 20% when under 40% full (limits ×0.5–×4). |
 | `mac_autofarm_enabled`, `mac_autofarm_radius`, `mac_autofarm_max_per_run`, `mac_autofarm_interval_hours`, `mac_autofarm_troop`, `mac_autofarm_troop_count`, `mac_autofarm_list` | `true`/`false`, fields, count, hours, troop name, count, list name | Periodically add the nearest empty, unoccupied oases to a farm list. **Adds attack targets**: see section 9. Job key `autofarm`. |
 | `mac_overflow_guard_enabled`, `mac_overflow_threshold_percent` | `true`/`false`, `50`–`100` | When a resource reaches this share of storage: train troops, and queue one field upgrade if no build item is pending. |

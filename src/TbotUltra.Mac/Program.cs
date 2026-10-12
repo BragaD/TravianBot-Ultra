@@ -102,6 +102,7 @@ app.MapGet("/api/state", () =>
         events = engine.Events(),
         attacks = engine.Attacks(),
         culture = engine.Culture,
+        celebrationsWanted = active.Length == 0 || engine.CelebrationsWanted(settings.Load(active)),
         settleSpots = engine.SettleSpots,
         catapultSetup = engine.CatapultSetup,
         farmLists = engine.FarmLists,
@@ -654,6 +655,7 @@ object BuildSummary()
         {
             culturePoints = engine.Culture,
             slotFree = engine.Culture?.SlotFree,
+            celebrationsWanted = engine.CelebrationsWanted(current),
             enoughCulturePointsAtUtc = engine.Culture?.ReadyAtUtc,
             settleSpots = engine.SettleSpots.Take(40),
         },

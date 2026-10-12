@@ -69,6 +69,10 @@ public static class MacDefaults
         ["mac_evasion_include_hero"] = "true",
         ["mac_evasion_lead_minutes"] = "6",
 
+        // Celebrations exist to earn culture points, so by default they pause once there are enough.
+        ["mac_celebrate_only_when_cp_short"] = "true",
+        ["town_hall_celebration_mode"] = "small",
+
         // Raid sizing from reports.
         ["mac_raid_sizing_enabled"] = "true",
 

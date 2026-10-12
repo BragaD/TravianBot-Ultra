@@ -1029,6 +1029,17 @@ public sealed class BotEngine
         return added > 0 ? $"Added {added} new empty oasis target(s)." : "No new empty oases nearby.";
     }
 
+    // ----- Celebrations ----------------------------------------------------------------------------
+
+    /// <summary>
+    /// Celebrations cost resources to earn culture points. With the option on they only run while the
+    /// next village is waiting on culture points; unknown culture points count as "still needed".
+    /// </summary>
+    internal bool CelebrationsWanted(MacSettings settings)
+        => !OptionOn(settings, "mac_celebrate_only_when_cp_short")
+           || _culture is null
+           || _culture.Produced < _culture.Needed;
+
     // ----- Crop balance ----------------------------------------------------------------------------
 
     private readonly Dictionary<string, DateTimeOffset> _cropWarnedAt = new(StringComparer.OrdinalIgnoreCase);
@@ -1692,7 +1703,7 @@ public sealed class BotEngine
                 jobs.Add(new Job($"brewery:{village.Key}", $"Brewery celebration in {village.Name}", "run_brewery_celebration", target, 30, 60, village.Key));
             }
 
-            if (features.TownHall && villageSettings.TownHall)
+            if (features.TownHall && villageSettings.TownHall && CelebrationsWanted(settings))
             {
                 jobs.Add(new Job($"townhall:{village.Key}", $"Town Hall celebration in {village.Name}", "run_town_hall_celebration", target, 30, 60, village.Key));
             }
