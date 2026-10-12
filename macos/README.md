@@ -27,10 +27,11 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
      bottom. When an item costs more than the Warehouse or Granary can hold, the storage upgrade it
      needs is queued in front of it, and you are warned when the queued upkeep would push the crop
      balance below zero. Building templates are reusable build orders you can apply to
-     any village.
-   - **Hero** — adventures (minimum HP, shortest/first), auto-revive, the order and maximum for
-     attribute points, adventure bonus videos, and using the hero's inventory resources when a
-     build is short on resources.
+     any village; a template step can raise all fields or one resource type (wood, clay, iron
+     or crop).
+   - **Hero** — adventures (minimum HP, shortest/first), auto-revive, healing with ointments, the
+     order and maximum for attribute points, bonus videos that make adventures hard or shorter,
+     and using the hero's inventory resources when a build is short on resources.
    - **Expansion** — culture points and when the next village becomes possible, a checklist of what
      the village still needs, one click to queue a Residence to level 10, and a map search for free
      valleys (croppers flagged). Town Hall celebrations can be limited to the time culture points
@@ -44,8 +45,9 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
      In that mode it remembers which raids are still out and skips those targets, and it reads your
      raid reports: a target whose latest raid lost troops is put on hold until you release it, and
      raid sizes follow how full the last raid came home.
-   - **Troops** — per-village training rules for Barracks, Stable and Workshop, Smithy upgrade
-     targets, and Town Hall and Brewery celebrations.
+   - **Troops** — per-village training rules for Barracks, Stable and Workshop, Academy research
+     (a list of troops, researched one at a time when resources allow), Smithy upgrade targets,
+     trap building at the Trapper (Gauls), and Town Hall and Brewery celebrations.
    - **Transfers** — send resources and reinforcements between your own villages on a schedule.
    - **Catapults** — prepare a first attack plus following waves and send them together.
    - **Under attack** (in Settings) — the bot checks for incoming attacks every few minutes, sends
@@ -55,17 +57,21 @@ The app is written to `artifacts/macos/Tbot Ultra.app`. Drag it to Applications 
    - **Daily summary** — the Dashboard counts what was done today (builds, troop batches, raids and
      what they carried, adventures, attacks seen) and a notification sums it up each evening.
    - **Settings** — startup (log in and start the bot when the app opens) and session pacing (play
-     for a while, close the browser for a break, optional active hours), NPC trade and gold limits, bonus videos (25% faster build, +15% production),
-     and marking messages and reports as read.
+     for a while, close the browser for a break, optional active hours), keeping the Mac awake
+     while the bot runs, NPC trade and gold limits, bonus videos (25% faster build, +15%
+     production), marking messages and reports as read, and the colour scheme (Appearance).
 4. **Start bot**. The Dashboard shows what runs next; the **Log** tab shows everything the bot does.
 
 The game language must be English (Settings → *Set game language to English*).
 
 ## Planning
 
-The Building tab shows roughly when each queued item will be done, from today's stock and
-production. Costs are exact; build times start from the standard tables and are corrected from the
-builds the bot watches on your world, so early estimates are rough.
+The Building tab shows roughly when each queued item will be done. The estimate starts from today's
+stock, waits for the builds already running, raises production as queued field upgrades finish,
+and counts the hero's inventory resources when the bot may use them. Costs are exact; build times
+use the standard formula for your world's speed and Main Building level, 25% shorter where the
+bot watches the bonus video. Task rewards, raids and troop training are not counted. While the
+hero is dead the production it adds is missing, so estimates are much longer until it is revived.
 
 ## AI agents
 
@@ -84,5 +90,11 @@ Set `TBOT_ROOT` to use a different folder (for example one per account when runn
 
 ## Not in the macOS build
 
-The Windows app has more tools than this front-end exposes yet: proxy library and failover, incoming-attack alerts, report screenshots, and the
-Windows app's deeper build planning (requirement repair, time estimates).
+The Windows app has more tools than this front-end exposes yet: proxy library and failover, report
+screenshots, and automatic repair of missing building requirements.
+
+## Development
+
+To change the app, start with [CLAUDE.md](../CLAUDE.md) and
+[docs/MAC_DEVELOPMENT.md](../docs/MAC_DEVELOPMENT.md). `./macos/redeploy.sh` quits the running app,
+rebuilds it and reopens it.

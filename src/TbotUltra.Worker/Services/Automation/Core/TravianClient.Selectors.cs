@@ -28,6 +28,10 @@ public sealed partial class TravianClient
         public static string BuildBySlot(int slotId) =>
             $"/build.php?id={slotId}";
 
+        // Opens the building of this type in the active village without knowing its slot.
+        public static string BuildByGid(int gid) =>
+            $"/build.php?gid={gid}";
+
         public static string BuildBySlotTab(int slotId, int tab) =>
             $"/build.php?id={slotId}&t={tab}";
 

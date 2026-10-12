@@ -232,7 +232,7 @@ maximum). Field types are gid 1 wood, 2 clay, 3 iron, 4 crop.
 ```jsonc
 { "gid": 15, "name": "Main Building", "maxLevel": 20, "currentLevel": 11,
   "serverSpeed": 10, "mainBuildingLevel": 11,
-  "buildTimeFactor": 0.61, "buildTimeSamples": 8,   // correction learned from real builds here
+  "fasterVideo": { "minSeconds": 1800, "share": 1 }, // null when the bot does not watch the 25% video
   "requirements": [],
   "levels": [{ "level": 12, "wood": 1060, "clay": 605, "iron": 910, "crop": 305,
                "upkeepTotal": 18,        // crop per hour the building eats at this level, in total
@@ -250,17 +250,22 @@ estimates a plan **without queueing it**. `GET` on the same path estimates the p
               "finishesInSeconds": 4410,     // from now, cumulative over the plan
               "blocked": null }],            // or why a level can never be paid for
   "totalSeconds": 4410, "finishesAtUtc": "…",
-  "assumptions": ["One construction at a time (no second build slot).", "…"] }
+  "assumptions": ["One construction at a time, starting when the builds already running are done.", "…"] }
 ```
 
-Costs are exact. Build times start from the standard tables, which some worlds do not follow, so
-the app records the real duration each time it starts a field upgrade and scales the tables by the
-median ratio (`buildTimeFactor`). With `buildTimeSamples` at 0 treat times as rough.
+Costs are exact. Build times use the standard formula (base time ÷ world speed × 0.964 per Main
+Building level above 1). Where the bot is set to watch the "25% faster" bonus video, builds at
+least `fasterVideo.minSeconds` long are counted 25% shorter (times `share` when the video is only
+watched some of the time).
 
-The estimate walks the plan one level at a time: wait until the level is affordable from today's
-stock and production, pay, build, repeat. Read `assumptions`; real play is usually a little faster
-(a second build slot, rising production) and slower when troops are being trained from the same
-stock. A `blocked` item names the problem, most often a level that costs more than storage holds —
+The estimate walks the plan one level at a time: wait until the level is affordable, pay, build,
+repeat. It counts the builds already running in the game as done once they finish (and starts
+nothing before then), raises production as the plan's field upgrades complete, and draws on the
+hero's inventory when the bot is allowed to use it for construction. Production is today's rate
+as read from the game, which includes what a living hero adds: when the hero is dead it is much
+lower, and `assumptions` says so first. Read `assumptions`; real play
+is a little faster with a second build slot or task rewards, and slower when troops are being
+trained from the same stock. A `blocked` item names the problem, most often a level that costs more than storage holds —
 add a Warehouse or Granary upgrade before it (preflight does this when you queue).
 
 **Planning towards a goal.** A workable loop for "reach X as fast as possible":
@@ -293,6 +298,8 @@ need and send all of it back.
 | `farming` | Sending farm lists on a timer. |
 | `troops` | Training troops per village rules. |
 | `smithy`, `townHall`, `brewery` | Per-village smithy upgrades and celebrations. |
+| `academy` | Researching each village's `academyTargets` at the Academy, one at a time. |
+| `traps` | Building traps at the Trapper in villages with `traps` on (Gauls only). |
 | `collectTasks`, `collectDailyQuests` | Claiming rewards. |
 | `resourceTransfer`, `reinforcements` | Sending between own villages. |
 | `productionBonus` | Watching the +15% production videos. |
@@ -345,6 +352,10 @@ Current values are `settings.options` in `GET /api/state`; anything not listed t
   "enabled": true,                // automate this village at all
   "townHall": false, "brewery": false,
   "smithyTargets": "t1=10;t3=5",  // troop slot = target level
+  "academyTargets": "Swordsman;Pathfinder",  // troop names from /api/catalog, researched in this order;
+                                  // the bot empties the list once all of them are researched
+  "traps": true,                  // build traps here (needs a Trapper)
+  "trapsPerRun": 0,               // most traps queued per round; 0 = as many as the Trapper allows
   "troops": {                     // replaces the whole rule set for the village
     "troop_training_barracks_enabled": "true",
     "troop_training_barracks_troop_type": "Slave Militia",      // a name from /api/catalog troops

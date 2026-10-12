@@ -20,6 +20,8 @@ public sealed class FeatureToggles
     public bool ProductionBonus { get; set; }
     public bool MarkRead { get; set; }
     public bool AttackWatch { get; set; } = true;
+    public bool Academy { get; set; }
+    public bool Traps { get; set; }
 }
 
 public sealed class BuildItem
@@ -49,6 +51,15 @@ public sealed class VillageSettings
     /// <summary>Engine troop-training payload keys (troop_training_*) for this village.</summary>
     public Dictionary<string, string> Troops { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string SmithyTargets { get; set; } = string.Empty;
+
+    /// <summary>Troop names to research at the Academy, separated by ';', in the order to research them.</summary>
+    public string AcademyTargets { get; set; } = string.Empty;
+
+    /// <summary>Build traps in this village (Gauls).</summary>
+    public bool Traps { get; set; }
+
+    /// <summary>Most traps to queue per round; 0 queues as many as the Trapper allows.</summary>
+    public int TrapsPerRun { get; set; }
     public bool TownHall { get; set; }
     public bool Brewery { get; set; }
 }
@@ -94,12 +105,6 @@ public sealed class DailyStats
 
 public sealed class MacSettings
 {
-    /// <summary>
-    /// Observed build time divided by the standard table's, for recent builds. Worlds differ from the
-    /// tables (speed rounding, early-game bonuses), so estimates are scaled by the median of these.
-    /// </summary>
-    public List<double> BuildTimeSamples { get; set; } = [];
-
     /// <summary>Per-day counters keyed by local date (yyyy-MM-dd); the last two weeks are kept.</summary>
     public Dictionary<string, DailyStats> Daily { get; set; } = new(StringComparer.Ordinal);
     public StartupSettings Startup { get; set; } = new();
@@ -164,6 +169,26 @@ public sealed class SettingsStore
             WriteFile(VillagesPath(accountName), villages);
         }
     }
+
+    /// <summary>The hero as last read, so its inventory is known before the first read after a launch.</summary>
+    public HeroView? LoadHero(string accountName)
+    {
+        lock (_sync)
+        {
+            return ReadFile<HeroView>(HeroPath(accountName));
+        }
+    }
+
+    public void SaveHero(string accountName, HeroView hero)
+    {
+        lock (_sync)
+        {
+            WriteFile(HeroPath(accountName), hero);
+        }
+    }
+
+    private string HeroPath(string accountName)
+        => Path.Combine(AccountStoragePaths.AccountDirectory(_root, accountName), "mac_hero.json");
 
     private string SettingsPath(string accountName)
         => Path.Combine(AccountStoragePaths.AccountDirectory(_root, accountName), "mac_settings.json");

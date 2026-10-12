@@ -302,20 +302,18 @@ public static class BuildPlanner
     // UI text is English, so numbers are too, whatever the Mac's region is.
     private static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
 
-    /// <summary>Median of the observed/table build-time ratios; 1 when nothing has been observed.</summary>
-    public static double TimeFactor(IReadOnlyList<double> samples)
-    {
-        if (samples.Count == 0)
-        {
-            return 1;
-        }
+    /// <summary>
+    /// The "25% faster" bonus video as the bot is set to use it: for builds of at least
+    /// <paramref name="MinSeconds"/>, in <paramref name="Share"/> of the cases (1 = always).
+    /// </summary>
+    public sealed record FasterVideo(double MinSeconds, double Share);
 
-        var sorted = samples.OrderBy(value => value).ToList();
-        return sorted.Count % 2 == 1 ? sorted[sorted.Count / 2] : (sorted[(sorted.Count / 2) - 1] + sorted[sorted.Count / 2]) / 2;
-    }
+    /// <summary>Build time after the bonus video the bot would watch for a build of this length.</summary>
+    public static double WithVideo(double seconds, FasterVideo? video)
+        => video is not null && seconds >= video.MinSeconds ? seconds * (1 - (0.25 * video.Share)) : seconds;
 
     /// <summary>Cost and build time of each level of one building type, for this village's Main Building.</summary>
-    public static List<LevelCost> Costs(int gid, int fromLevel, int toLevel, double serverSpeed, int mainBuildingLevel, double timeFactor = 1)
+    public static List<LevelCost> Costs(int gid, int fromLevel, int toLevel, double serverSpeed, int mainBuildingLevel, FasterVideo? video = null)
     {
         var result = new List<LevelCost>();
         for (var level = Math.Max(1, fromLevel + 1); level <= Math.Min(toLevel, BuildingCatalogService.MaxLevelFor(gid)); level++)
@@ -324,7 +322,7 @@ public static class BuildPlanner
             {
                 result.Add(new LevelCost(
                     level, cost.Wood, cost.Clay, cost.Iron, cost.Crop, cost.Upkeep, cost.CulturePoints,
-                    (int)Math.Ceiling(BuildingCatalogService.BuildSecondsFor(gid, level, serverSpeed, Math.Max(1, mainBuildingLevel)) * timeFactor)));
+                    (int)Math.Ceiling(WithVideo(BuildingCatalogService.BuildSecondsFor(gid, level, serverSpeed, Math.Max(1, mainBuildingLevel)), video))));
             }
         }
 
@@ -335,17 +333,66 @@ public static class BuildPlanner
     /// Walks a list of build items one level at a time against the village's stock and production:
     /// wait until the level is affordable, pay, build, repeat. One thing is built at a time.
     /// </summary>
-    public static PlanEstimate Estimate(VillageView village, IReadOnlyList<BuildItem> items, double serverSpeed, double timeFactor = 1, int timeSamples = 0)
+    // Hourly production of one resource field per level at speed 1 (levels 0 to 20).
+    private static readonly int[] FieldProduction =
+        [3, 7, 13, 21, 31, 46, 70, 98, 140, 203, 280, 392, 525, 693, 889, 1120, 1400, 1820, 2240, 2800, 3430];
+
+    /// <summary>
+    /// The village as it will be once the constructions already running in the game are done: their
+    /// levels are counted as built, so the estimate neither repeats them nor forgets them.
+    /// </summary>
+    private static VillageView WithRunningConstructions(VillageView village)
     {
+        var fields = village.Fields.ToList();
+        var buildings = village.Buildings.ToList();
+        foreach (var construction in (village.Constructions ?? []).Where(entry => entry.Level is > 0).OrderBy(entry => entry.Level))
+        {
+            var level = construction.Level!.Value;
+            var building = buildings.FindIndex(entry =>
+                string.Equals(entry.Name, construction.Name, StringComparison.OrdinalIgnoreCase) && (entry.Level ?? 0) < level);
+            if (building >= 0)
+            {
+                buildings[building] = buildings[building] with { Level = level };
+                continue;
+            }
+
+            // Several fields share a name; the one being raised is the one a level below.
+            var field = fields.FindIndex(entry =>
+                string.Equals(entry.Name, construction.Name, StringComparison.OrdinalIgnoreCase) && (entry.Level ?? 0) == level - 1);
+            if (field >= 0)
+            {
+                fields[field] = fields[field] with { Level = level };
+            }
+        }
+
+        return village with { Fields = fields, Buildings = buildings };
+    }
+
+    /// <param name="heroResources">Wood, clay, iron and crop in the hero's inventory, when the bot may use them.</param>
+    public static PlanEstimate Estimate(
+        VillageView village, IReadOnlyList<BuildItem> items, double serverSpeed, FasterVideo? video = null, long[]? heroResources = null, bool heroDead = false)
+    {
+        var busyUntil = (village.Constructions ?? [])
+            .Where(entry => entry.FinishUtc is not null)
+            .Select(entry => (entry.FinishUtc!.Value - DateTimeOffset.UtcNow).TotalSeconds)
+            .DefaultIfEmpty(0)
+            .Max();
+        village = WithRunningConstructions(village);
+        var hero = (heroResources ?? [0, 0, 0, 0]).Select(value => (double)value).ToArray();
+
         var assumptions = new List<string>
         {
-            timeSamples > 0
-                ? $"Build times use the standard tables corrected by ×{timeFactor.ToString("0.##", CultureInfo.InvariantCulture)}, learned from {timeSamples} build(s) seen on this world."
-                : "Build times use the standard tables; they are corrected once the bot has watched a few builds on this world.",
-            "One construction at a time (no second build slot).",
-            "Production stays at today's rate; field upgrades in the plan would make it faster.",
-            "No resources spent on troops, and none added by raids, the hero or trades.",
+            video is null
+                ? "Build times are the standard ones for this world's speed and the Main Building level."
+                : $"Build times are the standard ones for this world's speed and the Main Building level, 25% shorter where the bot watches the bonus video (builds of {Math.Ceiling(video.MinSeconds / 60):0} minutes or more).",
+            "One construction at a time, starting when the builds already running are done.",
+            "Production grows as the plan's field upgrades finish.",
+            hero.Sum() > 0
+                ? "The hero's inventory resources are used when the village runs short."
+                : "No resources come from the hero's inventory.",
+            "No resources spent on troops, and none added by raids, task rewards or trades.",
         };
+
         var stockEntries = village.Stock ?? [];
         if (stockEntries.Count == 0 || village.UpdatedUtc is null)
         {
@@ -355,6 +402,16 @@ public static class BuildPlanner
         string[] names = ["wood", "clay", "iron", "crop"];
         var hoursSinceRead = Math.Max(0, (DateTimeOffset.UtcNow - village.UpdatedUtc.Value).TotalHours);
         var perHour = names.Select(name => stockEntries.FirstOrDefault(entry => entry.Resource == name)?.PerHour ?? 0).ToArray();
+        if (heroDead && village.ProductionWithHero is { Count: 4 } withHero)
+        {
+            perHour = perHour.Select((value, index) => Math.Max(value, withHero[index])).ToArray();
+            assumptions.Insert(0, "The hero is dead or reviving. Production is taken as it was with the hero, so times are right once it is back.");
+        }
+        else if (heroDead)
+        {
+            assumptions.Insert(0, "The hero is dead or reviving, so the production it adds is missing. Expect much shorter times once it is back.");
+        }
+
         var capacity = names.Select(name => (double)(stockEntries.FirstOrDefault(entry => entry.Resource == name)?.Capacity
             ?? (name == "crop" ? village.Granary : village.Warehouse) ?? 0)).ToArray();
         var stock = names.Select((name, index) => Math.Min(
@@ -380,14 +437,16 @@ public static class BuildPlanner
                     }
 
                     double[] price = [cost.Wood, cost.Clay, cost.Iron, cost.Crop];
-                    double wait = 0;
+
+                    // Nothing new starts while the game's own queue is still busy.
+                    double wait = Math.Max(0, busyUntil - clock - waited - built);
                     for (var index = 0; index < 4 && blocked is null; index++)
                     {
                         if (price[index] > capacity[index])
                         {
                             blocked = $"Level {level} costs {Number((long)price[index])} {names[index]}, more than storage holds ({Number((long)capacity[index])}).";
                         }
-                        else if (price[index] > stock[index])
+                        else if (price[index] > stock[index] + (perHour[index] * wait / 3600) + hero[index])
                         {
                             if (perHour[index] <= 0)
                             {
@@ -395,7 +454,7 @@ public static class BuildPlanner
                             }
                             else
                             {
-                                wait = Math.Max(wait, (price[index] - stock[index]) / perHour[index] * 3600);
+                                wait = Math.Max(wait, (price[index] - stock[index] - hero[index]) / perHour[index] * 3600);
                             }
                         }
                     }
@@ -405,11 +464,24 @@ public static class BuildPlanner
                         break;
                     }
 
-                    var duration = BuildingCatalogService.BuildSecondsFor(gid, level, serverSpeed, Math.Max(1, state.Buildings.GetValueOrDefault(15).Level)) * timeFactor;
+                    var duration = BuildingCatalogService.BuildSecondsFor(gid, level, serverSpeed, Math.Max(1, state.Buildings.GetValueOrDefault(15).Level));
+                    duration = WithVideo(duration, video);
                     for (var index = 0; index < 4; index++)
                     {
                         stock[index] = Math.Min(capacity[index], stock[index] + (perHour[index] * wait / 3600)) - price[index];
+                        if (stock[index] < 0)
+                        {
+                            // The shortfall comes out of the hero's inventory.
+                            hero[index] += stock[index];
+                            stock[index] = 0;
+                        }
+
                         stock[index] = Math.Min(capacity[index], stock[index] + (perHour[index] * duration / 3600));
+                    }
+
+                    if (gid is >= 1 and <= 4 && level < FieldProduction.Length)
+                    {
+                        perHour[gid - 1] += (FieldProduction[level] - FieldProduction[level - 1]) * serverSpeed;
                     }
 
                     waited += wait;
@@ -424,8 +496,11 @@ public static class BuildPlanner
 
             clock += waited + built;
             state.Apply(item);
+
+            // Nothing left to start: the item is done when the builds already running finish.
+            var finishes = steps == 0 && blocked is null ? Math.Max(clock, busyUntil) : clock;
             estimates.Add(new ItemEstimate(
-                BotEngine.DescribeBuildItem(item), steps, wood, clay, iron, crop, (int)Math.Ceiling(waited), (int)Math.Ceiling(built), (int)Math.Ceiling(clock), blocked));
+                BotEngine.DescribeBuildItem(item), steps, wood, clay, iron, crop, (int)Math.Ceiling(waited), (int)Math.Ceiling(built), (int)Math.Ceiling(finishes), blocked));
             if (blocked is not null)
             {
                 assumptions.Add("Items after a blocked one are estimated as if it were skipped.");
@@ -531,7 +606,8 @@ public static class BuildPlanner
 
                 break;
             case "building_construct" when item.Gid is int constructGid:
-                ranges.Add((constructGid, 0, item.TargetLevel));
+                // The building may already stand (or be under construction) from an earlier round.
+                ranges.Add((constructGid, state.GidAtSlot(item.SlotId) == constructGid ? state.LevelAtSlot(item.SlotId) : 0, item.TargetLevel));
                 break;
             case "building_upgrade" or "building_max":
                 if ((item.Gid ?? state.GidAtSlot(item.SlotId)) is int upgradeGid)

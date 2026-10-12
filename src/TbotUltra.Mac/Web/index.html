@@ -354,7 +354,7 @@ document.addEventListener("change", async event => {
 
 // ----- Rendering -----------------------------------------------------------------------------
 const FEATURES = [["construction", "Building"], ["hero", "Hero adventures"], ["heroResources", "Use hero inventory resources"],
-  ["farming", "Farm lists"], ["troops", "Train troops"], ["smithy", "Smithy upgrades"], ["townHall", "Town Hall celebrations"], ["brewery", "Brewery celebrations"],
+  ["farming", "Farm lists"], ["troops", "Train troops"], ["academy", "Academy research"], ["smithy", "Smithy upgrades"], ["traps", "Build traps (Gauls)"], ["townHall", "Town Hall celebrations"], ["brewery", "Brewery celebrations"],
   ["resourceTransfer", "Resource transfers"], ["reinforcements", "Reinforcements"], ["productionBonus", "+15% production videos"],
   ["markRead", "Mark messages/reports read"], ["attackWatch", "Watch for incoming attacks"],
   ["collectTasks", "Collect task rewards"], ["collectDailyQuests", "Collect daily quests"]];
@@ -698,13 +698,23 @@ function renderTroops() {
     const troop = all.find(a => `t${a.index}` === key);
     return `<span class="pill">${esc(troop?.name ?? key)} → ${esc(level)} <button class="mini" data-smithy-remove="${esc(key)}">✕</button></span>`;
   }).join(" ");
+  const academyRows = (vs.academyTargets || "").split(";").filter(Boolean).map(name =>
+    `<span class="pill">${esc(name)} <button class="mini" data-academy-remove="${esc(name)}">✕</button></span>`).join(" ");
   $("troopPane").innerHTML = `${cards}
     <div class="card"><h2>Smithy upgrades — ${esc(village.name)}</h2><div class="row">${smithyRows || '<span class="muted">No smithy targets.</span>'}</div>
       <div class="row" style="margin-top:8px"><select id="smithyTroop">${all.filter(a => a.index).map(a => `<option value="t${a.index}">${esc(a.name)}</option>`).join("")}</select>
         <label>to level <input type="number" id="smithyLevel" min="1" max="20" value="5"></label><button class="btn" id="btnSmithyAdd">Add</button></div></div>
+    <div class="card"><h2>Academy research — ${esc(village.name)}</h2><div class="row">${academyRows || '<span class="muted">No troops to research.</span>'}</div>
+      <div class="row" style="margin-top:8px"><select id="academyTroop">${all.filter(a => a.index > 1 && a.index < 10).map(a => `<option>${esc(a.name)}</option>`).join("")}</select>
+        <button class="btn" id="btnAcademyAdd">Add</button></div>
+      <p class="muted">Researched one at a time, in this order, when the Academy is free and resources allow. The list empties itself when everything is researched.</p></div>
+    ${state.tribe === "Gauls" ? `<div class="card"><h2>Traps — ${esc(village.name)}</h2><div class="row">
+      <label><input type="checkbox" data-village="${esc(village.key)}" data-village-field="traps" ${vs.traps ? "checked" : ""}> Build traps at the Trapper</label>
+      <label>At most <input type="number" id="trapsPerRun" min="0" max="100000" value="${esc(vs.trapsPerRun ?? 0)}"> per round (0 = as many as possible)</label>
+      <button class="btn" id="btnTrapsSave">Save</button></div></div>` : ""}
     <div class="card"><label><input type="checkbox" data-village="${esc(village.key)}" data-village-field="townHall" ${vs.townHall ? "checked" : ""}> Hold Town Hall celebrations in ${esc(village.name)}</label>
       <label style="margin-left:18px"><input type="checkbox" data-village="${esc(village.key)}" data-village-field="brewery" ${vs.brewery ? "checked" : ""}> Hold Brewery celebrations (Teutons, capital only)</label></div>
-    <p class="muted">Turn on “Train troops” (and Smithy / Town Hall / Brewery) on the Dashboard for these rules to run.</p>`;
+    <p class="muted">Turn on “Train troops” (and Academy / Smithy / Traps / Town Hall / Brewery) on the Dashboard for these rules to run.</p>`;
 }
 async function saveTroops() {
   const troops = {};
@@ -819,7 +829,7 @@ async function refresh() {
   await refreshEstimate();
   renderHeader(); renderDashboard();
   keep("buildPane", selectedVillage, renderBuild);
-  renderTroops(); renderHero(); renderHeroStats();
+  keep("troopPane", selectedVillage, renderTroops); renderHero(); renderHeroStats();
   keep("tab-farming", "", () => { renderFarming(); renderFarmLoss(); renderRaidState(); renderFarmForms(); renderScan(); });
   keep("tab-expansion", "", renderExpansion);
   keep("tab-transfers", "", renderTransfers);
@@ -1158,11 +1168,25 @@ document.addEventListener("click", async event => {
     $("ftCoords").value = ""; refresh();
   }
   else if (d.smithyRemove) { await saveSmithy(entries => entries.filter(([key]) => key !== d.smithyRemove)); }
+  else if (d.academyRemove) { await saveAcademy(names => names.filter(name => name !== d.academyRemove)); }
+  else if (event.target.id === "btnAcademyAdd") {
+    const troop = $("academyTroop").value;
+    await saveAcademy(names => [...names.filter(name => name !== troop), troop]);
+  }
+  else if (event.target.id === "btnTrapsSave") {
+    await api("PUT", `/api/villages/${encodeURIComponent(selectedVillage)}`, { trapsPerRun: Number($("trapsPerRun").value) || 0 });
+    document.activeElement?.blur(); await refresh();
+  }
   else if (event.target.id === "btnSmithyAdd") {
     const key = $("smithyTroop").value, level = $("smithyLevel").value;
     await saveSmithy(entries => [...entries.filter(([k]) => k !== key), [key, level]]);
   }
 });
+async function saveAcademy(change) {
+  const current = (state.settings.villages[selectedVillage]?.academyTargets || "").split(";").filter(Boolean);
+  await api("PUT", `/api/villages/${encodeURIComponent(selectedVillage)}`, { academyTargets: change(current).join(";") });
+  document.activeElement?.blur(); await refresh();
+}
 async function saveSmithy(change) {
   const current = (state.settings.villages[selectedVillage]?.smithyTargets || "").split(";").filter(Boolean).map(e => e.split("="));
   const smithyTargets = change(current).map(([k, v]) => `${k}=${v}`).join(";");

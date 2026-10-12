@@ -16,8 +16,10 @@ Behavior-preserving refactors use the checks in `docs/REFACTOR_PARITY.md`.
 | `TbotUltra.Core` | Config (`BotOptions`), task payloads, catalogs. No browser/UI. | — |
 | `TbotUltra.Worker` | Game automation via Playwright. `TravianClient` owns server interaction, `BotTaskRunner` runs tasks. | Core |
 | `TbotUltra.Desktop` | WPF UI: `MainWindow` partials + ViewModels. | Worker, Core |
+| `TbotUltra.Mac` | macOS app: local web server, single-page UI and its own job loop (`BotEngine`). File map and recipes in `docs/MAC_DEVELOPMENT.md`. | Worker, Core |
 
-Dependency direction: `Desktop → Worker → Core`. Tests: `*.Tests` per project.
+Dependency direction: `Desktop → Worker → Core` and `Mac → Worker → Core`. Tests: `*.Tests` per
+project (none for Mac yet).
 
 ---
 

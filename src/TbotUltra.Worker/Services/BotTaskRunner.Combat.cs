@@ -30,6 +30,40 @@ public sealed partial class BotTaskRunner
         return result ?? new TroopEvasionResult(TroopEvasionOutcome.Failed, "Troop evasion did not return a result.");
     }
 
+    public async Task<AcademyResearchResult> ResearchTroopsAtAcademyAsync(
+        BotOptions options,
+        IReadOnlyList<string> troopNames,
+        Action<string> log,
+        string? accountName = null,
+        CancellationToken cancellationToken = default)
+    {
+        AcademyResearchResult? result = null;
+        await ExecuteWithClientAsync(options, log, accountName, interactive: false, cancellationToken, async client =>
+        {
+            await client.LoginAsync(cancellationToken);
+            await TrySwitchToTargetVillageAsync(client, options, log, cancellationToken, skipFeatureRefresh: true);
+            result = await client.ResearchTroopsAtAcademyAsync(troopNames, options.HeroResourceUseSmithy, cancellationToken);
+        });
+        return result ?? new AcademyResearchResult(AcademyResearchOutcome.Waiting, "Academy research did not return a result.", 300, troopNames);
+    }
+
+    public async Task<TrapBuildResult> BuildTrapsAsync(
+        BotOptions options,
+        int maxPerRun,
+        Action<string> log,
+        string? accountName = null,
+        CancellationToken cancellationToken = default)
+    {
+        TrapBuildResult? result = null;
+        await ExecuteWithClientAsync(options, log, accountName, interactive: false, cancellationToken, async client =>
+        {
+            await client.LoginAsync(cancellationToken);
+            await TrySwitchToTargetVillageAsync(client, options, log, cancellationToken, skipFeatureRefresh: true);
+            result = await client.BuildTrapsAsync(maxPerRun, cancellationToken);
+        });
+        return result ?? new TrapBuildResult(TrapBuildOutcome.Failed, "Trap building did not return a result.", 0, null);
+    }
+
     public async Task<TroopEvasionValidationResult> ValidateTroopEvasionAsync(
         BotOptions options,
         TroopEvasionRequest request,

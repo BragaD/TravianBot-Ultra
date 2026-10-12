@@ -36,7 +36,9 @@ public sealed record VillageView(
     DateTimeOffset? UpdatedUtc,
     List<StockView>? Stock = null,
     List<TrainingView>? Training = null,
-    int? Population = null);
+    int? Population = null,
+    // Hourly production (wood, clay, iron, crop) as last read while the hero was alive.
+    List<double>? ProductionWithHero = null);
 
 public sealed record AccountView(int? Gold, int? Silver, int UnreadMessages, int UnreadReports, DateTimeOffset UpdatedUtc);
 
@@ -106,6 +108,8 @@ public sealed class BotEngine
     private const string AttackWatchTask = "watch_incoming_attacks";
     private const string CultureTask = "read_culture_points";
     private const string AutoFarmTask = "grow_farm_lists";
+    private const string AcademyTask = "research_at_academy";
+    private const string TrapsTask = "build_traps";
 
     private readonly object _sync = new();
     private readonly string _root;
@@ -190,6 +194,9 @@ public sealed class BotEngine
     public PromptView? Prompt => _prompt;
 
     public HeroView? Hero => _hero;
+
+    /// <summary>The hero is dead or being revived, so it adds no production right now.</summary>
+    public bool HeroDown => _hero?.State is "Dead" or "Reviving";
 
     public ScanView? Scan => _scan;
 
@@ -1368,15 +1375,7 @@ public sealed class BotEngine
 
     private async Task ExecuteJobAsync(AccountEntry account, MacSettings settings, Job job, CancellationToken cancellationToken)
     {
-        _workingVillageKey = job.VillageKey;
-        try
-        {
-            await ExecuteJobCoreAsync(account, settings, job, cancellationToken);
-        }
-        finally
-        {
-            _workingVillageKey = null;
-        }
+        await ExecuteJobCoreAsync(account, settings, job, cancellationToken);
 
         RecordEvent(job.Title, _lastResult.GetValueOrDefault(job.Key, string.Empty));
     }
@@ -1413,6 +1412,48 @@ public sealed class BotEngine
                     ? TimeSpan.FromSeconds(Random.Shared.Next(90, 150))
                     : job.SuccessInterval();
                 Schedule(job.Key, next, attacks.Count == 0 ? "No incoming attacks." : $"{attacks.Count} incoming attack(s); next lands {attacks[0].ArrivalUtc.ToLocalTime():HH:mm:ss}.");
+                return;
+            }
+
+            if (job.Task == AcademyTask)
+            {
+                var wanted = job.Payload[AcademyTask].Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var research = await _runner.ResearchTroopsAtAcademyAsync(options, wanted, Log, cancellationToken: cancellationToken);
+                if (research.Outcome == AcademyResearchOutcome.AllResearched && job.VillageKey is { } academyVillage)
+                {
+                    // Nothing left to do: clear the list so the job stops visiting the Academy.
+                    _settings.Update(account.Name, current =>
+                    {
+                        if (current.Villages.TryGetValue(academyVillage, out var village))
+                        {
+                            village.AcademyTargets = string.Empty;
+                        }
+                    });
+                }
+
+                var academyDelay = research.Outcome switch
+                {
+                    AcademyResearchOutcome.Blocked or AcademyResearchOutcome.NoAcademy => TimeSpan.FromMinutes(Random.Shared.Next(60, 120)),
+                    _ when research.RetrySeconds is int seconds => TimeSpan.FromSeconds(seconds + Random.Shared.Next(20, 90)),
+                    _ => job.SuccessInterval(),
+                };
+                Schedule(job.Key, academyDelay > MaxDeferral ? MaxDeferral : academyDelay, research.Message);
+                return;
+            }
+
+            if (job.Task == TrapsTask)
+            {
+                var perRun = int.TryParse(job.Payload[TrapsTask], out var parsed) ? parsed : 0;
+                var traps = await _runner.BuildTrapsAsync(options, perRun, Log, cancellationToken: cancellationToken);
+                if (traps.Queued > 0)
+                {
+                    Count(account.Name, day => day.TrainingBatches++);
+                }
+
+                Schedule(
+                    job.Key,
+                    traps.Outcome == TrapBuildOutcome.NoTrapper ? TimeSpan.FromMinutes(Random.Shared.Next(60, 120)) : job.SuccessInterval(),
+                    traps.Message);
                 return;
             }
 
@@ -1840,6 +1881,24 @@ public sealed class BotEngine
                 jobs.Add(new Job($"smithy:{village.Key}", $"Smithy upgrades in {village.Name}", "upgrade_troops_at_smithy", payload, 30, 60, village.Key));
             }
 
+            if (features.Academy && !string.IsNullOrWhiteSpace(villageSettings.AcademyTargets))
+            {
+                var payload = new Dictionary<string, string>(target, StringComparer.OrdinalIgnoreCase)
+                {
+                    [AcademyTask] = villageSettings.AcademyTargets,
+                };
+                jobs.Add(new Job($"academy:{village.Key}", $"Academy research in {village.Name}", AcademyTask, payload, 30, 60, village.Key));
+            }
+
+            if (features.Traps && villageSettings.Traps && string.Equals(_tribe, "Gauls", StringComparison.OrdinalIgnoreCase))
+            {
+                var payload = new Dictionary<string, string>(target, StringComparer.OrdinalIgnoreCase)
+                {
+                    [TrapsTask] = villageSettings.TrapsPerRun.ToString(CultureInfo.InvariantCulture),
+                };
+                jobs.Add(new Job($"traps:{village.Key}", $"Build traps in {village.Name}", TrapsTask, payload, 20, 45, village.Key));
+            }
+
             if (features.Brewery && villageSettings.Brewery)
             {
                 jobs.Add(new Job($"brewery:{village.Key}", $"Brewery celebration in {village.Name}", "run_brewery_celebration", target, 30, 60, village.Key));
@@ -1951,7 +2010,10 @@ public sealed class BotEngine
                 var current = _hero ?? new HeroView("Unknown", null, 0, null, DateTimeOffset.UtcNow);
                 _hero = current with
                 {
+                    // A revived hero returns at full health, so a nearly dead one is still being revived.
                     State = result.Contains("dead=True", StringComparison.OrdinalIgnoreCase) ? "Dead"
+                        : result.Contains("reviving", StringComparison.OrdinalIgnoreCase)
+                            || (current.State == "Reviving" && hp.Success && int.Parse(hp.Groups[1].Value, CultureInfo.InvariantCulture) < 20) ? "Reviving"
                         : result.Contains("in_village=False", StringComparison.OrdinalIgnoreCase) || result.Contains("adventure_sent", StringComparison.OrdinalIgnoreCase) ? "Away"
                         : "Home",
                     Hp = hp.Success ? int.Parse(hp.Groups[1].Value, CultureInfo.InvariantCulture) : current.Hp,
@@ -2075,7 +2137,7 @@ public sealed class BotEngine
             ? new Dictionary<string, VillageView>(StringComparer.OrdinalIgnoreCase)
             : _settings.LoadVillages(accountName);
         _farmLists = [];
-        _hero = null;
+        _hero = accountName.Length == 0 ? null : _settings.LoadHero(accountName);
         _tribe = _villages.Values.Select(village => village.Tribe).FirstOrDefault(IsKnownTribe) ?? "Unknown";
     }
 
@@ -2147,6 +2209,17 @@ public sealed class BotEngine
                         ?? active.Population,
                     UpdatedUtc = DateTimeOffset.UtcNow,
                 };
+
+                // A dead hero stops adding production; remember the last rate with it for estimates.
+                if (!HeroDown && _villages[activeKey].Stock is { Count: > 0 } stock)
+                {
+                    _villages[activeKey] = _villages[activeKey] with
+                    {
+                        ProductionWithHero = new[] { "wood", "clay", "iron", "crop" }
+                            .Select(name => stock.FirstOrDefault(entry => entry.Resource == name)?.PerHour ?? 0)
+                            .ToList(),
+                    };
+                }
             }
 
             _settings.SaveVillages(accountName, _villages);
@@ -2209,11 +2282,17 @@ public sealed class BotEngine
         }
 
         _hero = new HeroView(
-            status?.IsDead == true ? "Dead" : status?.State ?? _hero?.State ?? "Unknown",
+            status?.IsDead == true ? "Dead"
+                : status?.ReviveRemainingSeconds is > 0 || status?.ReviveFinish?.FinishUtc > DateTimeOffset.UtcNow ? "Reviving"
+                : status?.State ?? _hero?.State ?? "Unknown",
             status?.HpPercent ?? _hero?.Hp,
             adventureCount ?? status?.AdventuresAvailable ?? _hero?.Adventures ?? 0,
             inventory ?? _hero?.Inventory,
             DateTimeOffset.UtcNow);
+        if (!string.IsNullOrEmpty(_villagesAccount))
+        {
+            _settings.SaveHero(_villagesAccount, _hero);
+        }
     }
 
     private void ApplyFarmLists(IReadOnlyList<FarmListOverview> lists)
@@ -2309,61 +2388,6 @@ public sealed class BotEngine
     private void Log(string message)
     {
         _log.Add(message);
-        ObserveBuildTime(message);
-    }
-
-    private string? _workingVillageKey;
-
-    // The engine logs the real duration when it starts a field upgrade
-    // ("click ok — slot=1 'Woodcutter' lvl 3 → 4 queued (duration~113s)"). Comparing it with the
-    // standard table gives the correction this world needs for estimates.
-    private void ObserveBuildTime(string message)
-    {
-        var match = Regex.Match(message, @"click ok — slot=\d+ '(?<name>[^']+)' lvl \d+ → (?<level>\d+) queued \(duration~(?<seconds>\d+)s\)");
-        if (!match.Success || _workingVillageKey is null)
-        {
-            return;
-        }
-
-        try
-        {
-            var accountName = _accounts.ActiveAccountName();
-            var account = _accounts.Find(accountName);
-            VillageView? village;
-            lock (_sync)
-            {
-                _villages.TryGetValue(_workingVillageKey, out village);
-            }
-
-            var gid = BuildingCatalogService.GidForName(match.Groups["name"].Value);
-            if (account is null || village is null || gid is not int id)
-            {
-                return;
-            }
-
-            var speedMatch = Regex.Match(account.ServerUrl, @"[./]x(\d+)\.");
-            var speed = speedMatch.Success ? double.Parse(speedMatch.Groups[1].Value, CultureInfo.InvariantCulture) : 1;
-            var mainBuilding = village.Buildings.FirstOrDefault(building => building.Gid == 15)?.Level ?? 1;
-            var table = BuildingCatalogService.BuildSecondsFor(id, int.Parse(match.Groups["level"].Value, CultureInfo.InvariantCulture), speed, Math.Max(1, mainBuilding));
-            var ratio = table > 0 ? double.Parse(match.Groups["seconds"].Value, CultureInfo.InvariantCulture) / table : 0;
-            if (ratio is < 0.2 or > 3)
-            {
-                return;
-            }
-
-            _settings.Update(accountName, settings =>
-            {
-                settings.BuildTimeSamples.Add(Math.Round(ratio, 3));
-                if (settings.BuildTimeSamples.Count > 20)
-                {
-                    settings.BuildTimeSamples.RemoveRange(0, settings.BuildTimeSamples.Count - 20);
-                }
-            });
-        }
-        catch (Exception ex) when (ex is FormatException or InvalidOperationException or IOException)
-        {
-            // Calibration is a nicety; a log line it cannot use is simply skipped.
-        }
     }
 
     private static string Shorten(string? text)

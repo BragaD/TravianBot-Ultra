@@ -395,6 +395,9 @@ app.MapPut("/api/villages/{key}", (string key, VillagePatch patch) =>
         village.TownHall = patch.TownHall ?? village.TownHall;
         village.Brewery = patch.Brewery ?? village.Brewery;
         village.SmithyTargets = patch.SmithyTargets ?? village.SmithyTargets;
+        village.AcademyTargets = patch.AcademyTargets ?? village.AcademyTargets;
+        village.Traps = patch.Traps ?? village.Traps;
+        village.TrapsPerRun = Math.Clamp(patch.TrapsPerRun ?? village.TrapsPerRun, 0, 100000);
         if (patch.Troops is not null)
         {
             village.Troops = new Dictionary<string, string>(patch.Troops, StringComparer.OrdinalIgnoreCase);
@@ -456,11 +459,10 @@ app.MapGet("/api/planning/costs", (int gid, int? from, int? to, string? villageK
         serverSpeed = ServerSpeed(account),
         mainBuildingLevel = mainBuilding,
         requirements = BuildingCatalogService.RequirementsFor(gid).Select(requirement => new { requirement.Name, requirement.Level }),
-        buildTimeFactor = BuildPlanner.TimeFactor(settings.Load(account).BuildTimeSamples),
-        buildTimeSamples = settings.Load(account).BuildTimeSamples.Count,
+        fasterVideo = Video(settings.Load(account)),
         levels = BuildPlanner.Costs(
             gid, fromLevel, to ?? BuildingCatalogService.MaxLevelFor(gid), ServerSpeed(account), mainBuilding,
-            BuildPlanner.TimeFactor(settings.Load(account).BuildTimeSamples)),
+            Video(settings.Load(account))),
     });
 });
 
@@ -471,20 +473,20 @@ app.MapGet("/api/villages/{key}/plan/estimate", (string key) =>
     var current = settings.Load(account);
     var queue = RequireVillage(current, key).BuildQueue.Where(item => item.Status == "pending").ToList();
     return Results.Json(BuildPlanner.Estimate(
-        RequireVillageView(account, key), queue, ServerSpeed(account), BuildPlanner.TimeFactor(current.BuildTimeSamples), current.BuildTimeSamples.Count));
+        RequireVillageView(account, key), queue, ServerSpeed(account), Video(current), HeroResources(current), engine.HeroDown));
 });
 
 app.MapPost("/api/villages/{key}/plan/estimate", (string key, QueueReplacement request) =>
 {
     var account = RequireAccount();
     var village = RequireVillageView(account, key);
-    var samples = settings.Load(account).BuildTimeSamples;
     foreach (var item in request.Items ?? [])
     {
         FillName(item, village);
     }
 
-    return Results.Json(BuildPlanner.Estimate(village, request.Items ?? [], ServerSpeed(account), BuildPlanner.TimeFactor(samples), samples.Count));
+    return Results.Json(BuildPlanner.Estimate(
+        village, request.Items ?? [], ServerSpeed(account), Video(settings.Load(account)), HeroResources(settings.Load(account)), engine.HeroDown));
 });
 
 app.MapPut("/api/templates", (BuildTemplate template) =>
@@ -737,6 +739,32 @@ string RequireAccount()
 }
 
 // Speed worlds carry their multiplier in the host name, e.g. "rog.x10.international.travian.com".
+// How the bot is set to use the "25% faster build" video, for time estimates.
+BuildPlanner.FasterVideo? Video(MacSettings current)
+{
+    string Option(string key) => current.Options.GetValueOrDefault(key, MacDefaults.Options.GetValueOrDefault(key, string.Empty));
+    bool On(string key) => string.Equals(Option(key), "true", StringComparison.OrdinalIgnoreCase);
+    double Number(string key, double fallback)
+        => double.TryParse(Option(key), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : fallback;
+
+    if (!On("construct_faster_enabled"))
+    {
+        return null;
+    }
+
+    return new BuildPlanner.FasterVideo(
+        On("construct_faster_min_build_time_enabled") ? Number("construct_faster_min_build_minutes", 30) * 60 : 0,
+        On("construct_faster_random_enabled") ? Math.Clamp(Number("construct_faster_random_chance_percent", 50), 0, 100) / 100 : 1);
+}
+
+// What the hero carries, when the bot is allowed to spend it on construction.
+long[]? HeroResources(MacSettings current)
+{
+    var allowed = current.Features.HeroResources
+        && !string.Equals(current.Options.GetValueOrDefault("hero_resource_use_construction", MacDefaults.Options["hero_resource_use_construction"]), "false", StringComparison.OrdinalIgnoreCase);
+    return allowed && engine.Hero?.Inventory is { } inventory ? [inventory.Wood, inventory.Clay, inventory.Iron, inventory.Crop] : null;
+}
+
 double ServerSpeed(string account)
 {
     var match = System.Text.RegularExpressions.Regex.Match(accounts.Find(account)?.ServerUrl ?? string.Empty, @"[./]x(\d+)\.");
@@ -816,7 +844,9 @@ internal sealed record FarmTargetsAdd(string ListName, string TroopType, int Tro
 
 internal sealed record FarmListSelection(List<string>? Names, List<string>? Ids);
 
-internal sealed record VillagePatch(bool? Enabled, bool? TownHall, bool? Brewery, string? SmithyTargets, Dictionary<string, string>? Troops);
+internal sealed record VillagePatch(
+    bool? Enabled, bool? TownHall, bool? Brewery, string? SmithyTargets, Dictionary<string, string>? Troops,
+    string? AcademyTargets = null, bool? Traps = null, int? TrapsPerRun = null);
 
 internal sealed record VillageRequest(string VillageKey);
 
